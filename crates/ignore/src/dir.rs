@@ -23,6 +23,7 @@ use std::sync::{Arc, RwLock};
 use gitignore::{self, Gitignore, GitignoreBuilder};
 use overrides::{self, Override};
 use pathutil::{is_hidden, strip_prefix};
+use regex::Regex;
 use types::{self, Types};
 use walk::DirEntry;
 use {Error, Match, PartialErrorBuilder};
@@ -37,6 +38,7 @@ pub struct IgnoreMatch<'a>(IgnoreMatchInner<'a>);
 #[derive(Clone, Debug)]
 enum IgnoreMatchInner<'a> {
     Override(overrides::Glob<'a>),
+    OverrideRegex(&'a regex::Regex),
     Gitignore(&'a gitignore::Glob),
     Types(types::Glob<'a>),
     Hidden,
@@ -45,6 +47,10 @@ enum IgnoreMatchInner<'a> {
 impl<'a> IgnoreMatch<'a> {
     fn overrides(x: overrides::Glob<'a>) -> IgnoreMatch<'a> {
         IgnoreMatch(IgnoreMatchInner::Override(x))
+    }
+
+    fn override_regex(x: &'a regex::Regex) -> IgnoreMatch<'a> {
+        IgnoreMatch(IgnoreMatchInner::OverrideRegex(x))
     }
 
     fn gitignore(x: &'a gitignore::Glob) -> IgnoreMatch<'a> {
@@ -100,6 +106,8 @@ struct IgnoreInner {
     dir: PathBuf,
     /// An override matcher (default is empty).
     overrides: Arc<Override>,
+    /// An extra override whitelist.
+    override_regex: Option<Arc<Regex>>,
     /// A file type matcher.
     types: Arc<Types>,
     /// The parent directory to match next.
@@ -299,6 +307,7 @@ impl Ignore {
             compiled: self.0.compiled.clone(),
             dir: dir.to_path_buf(),
             overrides: self.0.overrides.clone(),
+            override_regex: self.0.override_regex.clone(),
             types: self.0.types.clone(),
             parent: Some(self.clone()),
             is_absolute_parent: false,
@@ -357,6 +366,17 @@ impl Ignore {
         let mut path = path.as_ref();
         if let Some(p) = strip_prefix("./", path) {
             path = p;
+        }
+        // check file search regex ("override regex") with extra highest precedence,
+        // this check can only cause files (not dirs) to be ignored
+        if let Some(re) = &self.0.override_regex {
+            if !is_dir {
+                if let Some(p) = path.to_str() {
+                    if !re.is_match(p) {
+                        return Match::Ignore(IgnoreMatch::override_regex(re));
+                    }
+                }
+            }
         }
         // Match against the override patterns. If an override matches
         // regardless of whether it's whitelist/ignore, then we quit and
@@ -534,6 +554,8 @@ pub struct IgnoreBuilder {
     overrides: Arc<Override>,
     /// A type matcher (default is empty).
     types: Arc<Types>,
+    /// File search regex (default is none).
+    override_regex: Option<Arc<Regex>>,
     /// Explicit global ignore matchers.
     explicit_ignores: Vec<Gitignore>,
     /// Ignore files in addition to .ignore.
@@ -551,6 +573,7 @@ impl IgnoreBuilder {
         IgnoreBuilder {
             dir: Path::new("").to_path_buf(),
             overrides: Arc::new(Override::empty()),
+            override_regex: None,
             types: Arc::new(Types::empty()),
             explicit_ignores: vec![],
             custom_ignore_filenames: vec![],
@@ -590,6 +613,7 @@ impl IgnoreBuilder {
             compiled: Arc::new(RwLock::new(HashMap::new())),
             dir: self.dir.clone(),
             overrides: self.overrides.clone(),
+            override_regex: self.override_regex.clone(),
             types: self.types.clone(),
             parent: None,
             is_absolute_parent: true,
@@ -615,6 +639,19 @@ impl IgnoreBuilder {
     /// This overrides any previous setting.
     pub fn overrides(&mut self, overrides: Override) -> &mut IgnoreBuilder {
         self.overrides = Arc::new(overrides);
+        self
+    }
+
+    /// Add a file search regex.
+    ///
+    /// A an extra whitelist applied after all other ignore logic.
+    pub fn file_search_regex(
+        &mut self,
+        re: Option<Regex>,
+    ) -> &mut IgnoreBuilder {
+        if let Some(re) = re {
+            self.override_regex = Some(Arc::new(re));
+        }
         self
     }
 

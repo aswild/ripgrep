@@ -10,6 +10,7 @@ use std::thread;
 use std::time::Duration;
 use std::vec;
 
+use regex::Regex;
 use same_file::Handle;
 use walkdir::{self, WalkDir};
 
@@ -682,6 +683,17 @@ impl WalkBuilder {
         file_name: S,
     ) -> &mut WalkBuilder {
         self.ig_builder.add_custom_ignore_filename(file_name);
+        self
+    }
+
+    /// Add a file search regex.
+    ///
+    /// This is an additional whitelist applied after all other logic
+    pub fn file_search_regex(
+        &mut self,
+        re: Option<Regex>,
+    ) -> &mut WalkBuilder {
+        self.ig_builder.file_search_regex(re);
         self
     }
 

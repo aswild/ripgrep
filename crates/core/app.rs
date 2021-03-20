@@ -572,6 +572,7 @@ pub fn all_args_and_flags() -> Vec<RGArg> {
     flag_encoding(&mut args);
     flag_engine(&mut args);
     flag_file(&mut args);
+    flag_file_search_regex(&mut args);
     flag_files(&mut args);
     flag_files_with_matches(&mut args);
     flag_files_without_match(&mut args);
@@ -1248,6 +1249,21 @@ A line is printed if and only if it matches at least one of the patterns.
         .long_help(LONG)
         .multiple()
         .allow_leading_hyphen();
+    args.push(arg);
+}
+
+fn flag_file_search_regex(args: &mut Vec<RGArg>) {
+    const SHORT: &str = "Search only files matching this regex";
+    const LONG: &str = long!(
+        "\
+After applying all other filtering, ignore, and filetype logic, match filenames
+against this regex and only search matching files.
+"
+    );
+    let arg = RGArg::flag("file-search-regex", "PATTERN")
+        .short("G")
+        .help(SHORT)
+        .long_help(LONG);
     args.push(arg);
 }
 

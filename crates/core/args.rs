@@ -877,6 +877,7 @@ impl ArgMatches {
             .same_file_system(self.is_present("one-file-system"))
             .skip_stdout(!self.is_present("files"))
             .overrides(self.overrides()?)
+            .file_search_regex(self.file_search_regex()?)
             .types(self.types()?)
             .hidden(!self.hidden())
             .parents(!self.no_ignore_parent())
@@ -1078,6 +1079,14 @@ impl ArgMatches {
         }
 
         Ok(EncodingMode::Some(Encoding::new(&label)?))
+    }
+
+    /// Returns a matcher for the file search regex
+    fn file_search_regex(&self) -> Result<Option<regex::Regex>> {
+        self.value_of_lossy("file-search-regex")
+            .map(|re| regex::Regex::new(&re))
+            .transpose()
+            .map_err(Into::into)
     }
 
     /// Return the file separator to use based on the CLI configuration.
