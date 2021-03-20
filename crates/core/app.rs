@@ -87,23 +87,26 @@ pub fn long_version(revision_hash: Option<&str>, cpu: bool) -> String {
         None => String::new(),
         Some(githash) => format!(" (rev {})", githash),
     };
+    let pcre2 = if cfg!(feature = "pcre2") { "+PCRE2" } else { "-PCRE2" };
     if !cpu {
         format!("{}{}", crate_version!(), hash,)
     } else {
         let runtime = runtime_cpu_features();
         if runtime.is_empty() {
             format!(
-                "{}{}\n{} (compiled)",
+                "{}{}\n{} {} (compiled)",
                 crate_version!(),
                 hash,
+                pcre2,
                 compile_cpu_features().join(" ")
             )
         } else {
             format!(
-                "{}{}\n{} (compiled)\n{} (runtime)",
+                "{}{}\n{} {} (compiled)\n{} (runtime)",
                 crate_version!(),
                 hash,
                 compile_cpu_features().join(" "),
+                pcre2,
                 runtime.join(" ")
             )
         }
