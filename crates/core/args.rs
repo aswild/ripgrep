@@ -969,7 +969,12 @@ impl ArgMatches {
         } else if preference == "ansi" {
             ColorChoice::AlwaysAnsi
         } else if preference == "auto" {
-            if cli::is_tty_stdout() || self.is_present("pretty") {
+            // default to no color when just printing file paths or stats
+            if self.is_present("files")
+                || self.output_kind() == OutputKind::Summary
+            {
+                ColorChoice::Never
+            } else if cli::is_tty_stdout() || self.is_present("pretty") {
                 ColorChoice::Auto
             } else {
                 ColorChoice::Never
