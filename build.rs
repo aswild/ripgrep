@@ -47,12 +47,14 @@ fn main() {
     // Make the current git hash available to the build.
     if let Some(rev) = git_revision_hash() {
         println!("cargo:rustc-env=RIPGREP_BUILD_GIT_HASH={}", rev);
+        println!("cargo:rerun-if-changed=.git/index");
+        println!("cargo:rerun-if-changed=.git/HEAD");
     }
 }
 
 fn git_revision_hash() -> Option<String> {
     let result = process::Command::new("git")
-        .args(&["rev-parse", "--short=10", "HEAD"])
+        .args(&["describe", "--tags", "--match=[0-9]*", "--dirty=+"])
         .output();
     result.ok().and_then(|output| {
         let v = String::from_utf8_lossy(&output.stdout).trim().to_string();
