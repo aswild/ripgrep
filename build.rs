@@ -52,18 +52,30 @@ fn main() {
     }
 }
 
+fn command_output(cmd: &[&str]) -> Option<String> {
+    process::Command::new(cmd[0]).args(&cmd[1..]).output().ok().and_then(
+        |output| {
+            let v = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if v.is_empty() {
+                None
+            } else {
+                Some(v)
+            }
+        },
+    )
+}
+
 fn git_revision_hash() -> Option<String> {
-    let result = process::Command::new("git")
-        .args(&["describe", "--tags", "--match=[0-9]*", "--dirty=+"])
-        .output();
-    result.ok().and_then(|output| {
-        let v = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if v.is_empty() {
-            None
-        } else {
-            Some(v)
-        }
-    })
+    // try to use git tags and revision count when possible, but 'cargo install' clones
+    // the git repo without fetching tags so fall back to just a rev hash if needed.
+    command_output(&[
+        "git",
+        "describe",
+        "--tags",
+        "--match=[0-9]*",
+        "--dirty=+",
+    ])
+    .or_else(|| command_output(&["git", "rev-parse", "--short=10", "HEAD"]))
 }
 
 fn generate_man_page<P: AsRef<Path>>(outdir: P) -> io::Result<()> {
