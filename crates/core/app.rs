@@ -1213,7 +1213,7 @@ between supported regex engines depending on the features used in a pattern on
 a best effort basis.
 
 Note that the 'pcre2' engine is an optional ripgrep feature. If PCRE2 wasn't
-including in your build of ripgrep, then using this flag will result in ripgrep
+included in your build of ripgrep, then using this flag will result in ripgrep
 printing an error message and exiting.
 
 This overrides previous uses of --pcre2 and --auto-hybrid-regex flags.
@@ -1451,6 +1451,10 @@ fn flag_hidden(args: &mut Vec<RGArg>) {
 Search hidden files and directories. By default, hidden files and directories
 are skipped. Note that if a hidden file or a directory is whitelisted in an
 ignore file, then it will be searched even if this flag isn't provided.
+
+A file or directory is considered hidden if its base name starts with a dot
+character ('.'). On operating systems which support a `hidden` file attribute,
+like Windows, files with this attribute are also considered hidden.
 
 This flag can be disabled with --no-hidden.
 "
@@ -1989,6 +1993,9 @@ fn flag_no_ignore_dot(args: &mut Vec<RGArg>) {
     const LONG: &str = long!(
         "\
 Don't respect .ignore files.
+
+This does *not* affect whether ripgrep will ignore files and directories
+whose names begin with a dot. For that, see --hidden.
 
 This flag can be disabled with the --ignore-dot flag.
 "
