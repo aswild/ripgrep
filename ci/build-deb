@@ -12,6 +12,26 @@ D="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 #
 # This should be run from the root of the ripgrep repo.
 
+TARGET=x86_64-unknown-linux-musl
+while (( $# )); do
+    case "$1" in
+        --target)
+            TARGET="$2"
+            shift
+            ;;
+        --no-target)
+            NO_TARGET=1
+            ;;
+    esac
+    shift
+done
+
+if (( NO_TARGET )); then
+    TARGET_ARGS=()
+else
+    TARGET_ARGS=(--target "$TARGET")
+fi
+
 if ! command -V cargo-deb > /dev/null 2>&1; then
     echo "cargo-deb command missing" >&2
     exit 1
@@ -39,4 +59,4 @@ cp complete/_rg "$DEPLOY_DIR/"
 
 # Since we're distributing the dpkg, we don't know whether the user will have
 # PCRE2 installed, so just do a static build.
-PCRE2_SYS_STATIC=1 cargo deb --target x86_64-unknown-linux-musl
+PCRE2_SYS_STATIC=1 cargo deb "${TARGET_ARGS[@]}"

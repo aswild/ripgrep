@@ -26,4 +26,4 @@ run docker run -t --rm \
     --volume "$PWD:/ripgrep" \
     --workdir /ripgrep \
     $DOCKER_IMAGE \
-    ci/build-deb
+    ci/build-deb --no-target
