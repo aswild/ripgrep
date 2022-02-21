@@ -1560,7 +1560,7 @@ impl<'s> Worker<'s> {
             dent = match DirEntryRaw::from_path(depth, path, true) {
                 Ok(dent) => DirEntry::new_raw(dent, None),
                 Err(err) => {
-                    return self.visitor.visit(Err(err));
+                    return self.visitor.visit(Err(err.with_depth(depth)));
                 }
             };
             if dent.is_dir() {

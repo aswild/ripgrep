@@ -1,3 +1,4 @@
+use std::io::ErrorKind;
 use std::path::Path;
 
 use ignore::{self, DirEntry};
@@ -39,7 +40,22 @@ impl SubjectBuilder {
         match result {
             Ok(dent) => self.build(dent),
             Err(err) => {
-                err_message!("{}", err);
+                match (err.depth(), err.io_error()) {
+                    (Some(d), Some(ioerr))
+                        if d > 0 && ioerr.kind() == ErrorKind::NotFound =>
+                    {
+                        // Suppress messages for "not found" IO errors, which are usually caused by
+                        // broken symlinks. However, still set the global errored flag so that the
+                        // exit code is set correctly. We check that the error depth is more than
+                        // zero so that errors are still printed for paths that are explicitly
+                        // specified on the command line.
+                        crate::messages::set_errored()
+                    }
+                    (_, _) => {
+                        // For all other errors, print the message as usual
+                        err_message!("{}", err);
+                    }
+                }
                 None
             }
         }
