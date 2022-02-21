@@ -467,7 +467,6 @@ impl<'s, M: Matcher, S: Sink> Core<'s, M, S> {
         let keepgoing = self.sink.context(
             &self.searcher,
             &SinkContext {
-                line_term: self.config.line_term,
                 bytes: &buf[*range],
                 kind: SinkContextKind::Before,
                 absolute_byte_offset: offset,
@@ -497,7 +496,6 @@ impl<'s, M: Matcher, S: Sink> Core<'s, M, S> {
         let keepgoing = self.sink.context(
             &self.searcher,
             &SinkContext {
-                line_term: self.config.line_term,
                 bytes: &buf[*range],
                 kind: SinkContextKind::After,
                 absolute_byte_offset: offset,
@@ -526,7 +524,6 @@ impl<'s, M: Matcher, S: Sink> Core<'s, M, S> {
         let keepgoing = self.sink.context(
             &self.searcher,
             &SinkContext {
-                line_term: self.config.line_term,
                 bytes: &buf[*range],
                 kind: SinkContextKind::Other,
                 absolute_byte_offset: offset,
