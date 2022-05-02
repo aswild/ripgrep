@@ -16,7 +16,8 @@ pub const DEFAULT_TYPES: &[(&str, &[&str])] = &[
     ("asciidoc", &["*.adoc", "*.asc", "*.asciidoc"]),
     ("asm", &["*.asm", "*.s", "*.S"]),
     ("asp", &[
-        "*.aspx", "*.aspx.cs", "*.aspx.vb", "*.ascx", "*.ascx.cs", "*.ascx.vb",
+        "*.aspx", "*.aspx.cs", "*.aspx.vb", "*.ascx", "*.ascx.cs",
+        "*.ascx.vb", "*.asp"
     ]),
     ("ats", &["*.ats", "*.dats", "*.sats", "*.hats"]),
     ("avro", &["*.avdl", "*.avpr", "*.avsc"]),
@@ -79,7 +80,7 @@ pub const DEFAULT_TYPES: &[(&str, &[&str])] = &[
     ("gradle", &["*.gradle"]),
     ("groovy", &["*.groovy", "*.gradle"]),
     ("gzip", &["*.gz", "*.tgz"]),
-    ("h", &["*.h", "*.hpp"]),
+    ("h", &["*.h", "*.hh", "*.hpp"]),
     ("haml", &["*.haml"]),
     ("haskell", &["*.hs", "*.lhs", "*.cpphs", "*.c2hs", "*.hsc"]),
     ("hbs", &["*.hbs"]),
