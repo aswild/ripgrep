@@ -1,4 +1,4 @@
-FROM rust:1-buster
+FROM rust:1-bullseye
 
 RUN set -x && \
     apt-get update && \
