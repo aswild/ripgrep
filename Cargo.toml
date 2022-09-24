@@ -80,6 +80,7 @@ pcre2 = ["grep/pcre2"]
 debug = 1
 
 [package.metadata.deb]
+name = "ripgrep-wild"
 features = ["pcre2"]
 section = "utils"
 assets = [
