@@ -540,12 +540,16 @@ It is possible that ripgrep's default options aren't suitable in every case.
 For that reason, and because shell aliases aren't always convenient, ripgrep
 supports configuration files.
 
-Setting up a configuration file is simple. ripgrep will not look in any
-predetermined directory for a config file automatically. Instead, you need to
-set the `RIPGREP_CONFIG_PATH` environment variable to the file path of your
-config file. Once the environment variable is set, open the file and just type
-in the flags you want set automatically. There are only two rules for
-describing the format of the config file:
+Setting up a configuration file is simple. Set the `RIPGREP_CONFIG_PATH`
+environment variable to the file path of your config file. On Unix platforms,
+the file `/etc/ripgreprc` will be used if it exists and `RIPGREP_CONFIG_PATH` is
+unset (there is no default config file on Windows). To disable using any config
+file, set `RIPGREP_CONFIG_PATH` to an empty string, or use the `--no-config`
+option.
+
+Once the environment variable is set, open the file and just type in the flags
+you want set automatically. There are only two rules for describing the format
+of the config file:
 
 1. Every line is a shell argument, after trimming whitespace.
 2. Lines starting with `#` (optionally preceded by any amount of whitespace)

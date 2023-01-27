@@ -2000,8 +2000,7 @@ fn flag_no_config(args: &mut Vec<RGArg>) {
 Never read configuration files. When this flag is present, ripgrep will not
 respect the RIPGREP_CONFIG_PATH environment variable.
 
-If ripgrep ever grows a feature to automatically read configuration files in
-pre-defined locations, then this flag will also disable that behavior as well.
+This flag also stops ripgrep from reading /etc/ripgreprc on Unix platforms.
 "
     );
     let arg = RGArg::switch("no-config").help(SHORT).long_help(LONG);

@@ -83,8 +83,10 @@ debug = 1
 name = "ripgrep-wild"
 features = ["pcre2"]
 section = "utils"
+conf-files = ["etc/ripgreprc"]
 assets = [
   ["target/release/rg", "usr/bin/", "755"],
+  ["contrib/ripgreprc", "etc/", "644"],
   ["COPYING", "usr/share/doc/ripgrep/", "644"],
   ["LICENSE-MIT", "usr/share/doc/ripgrep/", "644"],
   ["UNLICENSE", "usr/share/doc/ripgrep/", "644"],

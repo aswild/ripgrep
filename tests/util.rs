@@ -155,13 +155,13 @@ impl Dir {
     ///
     /// This also:
     ///
-    /// * Unsets the `RIPGREP_CONFIG_PATH` environment variable.
+    /// * Clears out the `RIPGREP_CONFIG_PATH` environment variable.
     /// * Sets the `--path-separator` to `/` so that paths have the same output
     ///   on all systems. Tests that need to check `--path-separator` itself
     ///   can simply pass it again to override it.
     pub fn command(&self) -> TestCommand {
         let mut cmd = self.bin();
-        cmd.env_remove("RIPGREP_CONFIG_PATH");
+        cmd.env("RIPGREP_CONFIG_PATH", "");
         cmd.current_dir(&self.dir);
         cmd.arg("--path-separator").arg("/");
         if self.is_pcre2() {

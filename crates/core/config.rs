@@ -14,24 +14,37 @@ use log;
 
 use crate::Result;
 
+/// On Unix, /etc/ripgreprc will be used as a default config file if RIPGREP_CONFIG_PATH is unset.
+#[cfg(unix)]
+const DEFAULT_CONFIG_PATH: Option<&str> = Some("/etc/ripgreprc");
+
+/// On Windows and other OSes, there is no default config file.
+#[cfg(not(unix))]
+const DEFAULT_CONFIG_PATH: Option<&str> = None;
+
 /// Return a sequence of arguments derived from ripgrep rc configuration files.
 pub fn args() -> Vec<OsString> {
-    let config_path = match env::var_os("RIPGREP_CONFIG_PATH") {
-        None => return vec![],
-        Some(config_path) => {
-            if config_path.is_empty() {
-                return vec![];
+    let (config_path, used_default) =
+        match (env::var_os("RIPGREP_CONFIG_PATH"), DEFAULT_CONFIG_PATH) {
+            (Some(config_path), _) => {
+                if config_path.is_empty() {
+                    return vec![];
+                }
+                (PathBuf::from(config_path), false)
             }
-            PathBuf::from(config_path)
-        }
-    };
+            (None, Some(default_path)) => (PathBuf::from(default_path), true),
+            (None, None) => return vec![],
+        };
     let (args, errs) = match parse(&config_path) {
         Ok((args, errs)) => (args, errs),
         Err(err) => {
-            message!(
-                "failed to read the file specified in RIPGREP_CONFIG_PATH: {}",
-                err
-            );
+            // don't print errors reading the default config file (it likely doesn't exist)
+            if !used_default {
+                message!(
+                    "failed to read the file specified in RIPGREP_CONFIG_PATH: {}",
+                    err
+                );
+            }
             return vec![];
         }
     };

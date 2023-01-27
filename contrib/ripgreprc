@@ -1,0 +1,27 @@
+# ripgrep config file, each line is its own command-line option, comments and blanks are ignored.
+# Every uncommented line is treated as a single argv, no quoting needed, but this also means that
+# there's no arg splitting on spaces in a single line.
+# Allen Wild's ripgreprc is distributed with this package, containing the base customizations that
+# I prefer. This file is used rather than changing the compiled-in defaults, because that would
+# break test cases.
+
+# default to smart case rather than case-sensitive
+--smart-case
+
+# skip gitignore processing by default, invert with --ignore-vcs
+--no-ignore-vcs
+
+# colors to mimic ag
+--colors=match:fg:magenta
+--colors=line:fg:yellow
+--colors=path:fg:green
+
+# type aliases
+--type-add=bb:include:bitbake
+--type-add=cxx:include:cpp
+--type-add=patch:include:diff
+--type-add=rs:include:rust
+
+# extend make type to include Makefile.*, as often seen in the Linux kernel
+# (note this is a glob, not a regex)
+--type-add=make:[Mm]akefile.*
