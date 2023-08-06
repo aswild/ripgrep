@@ -31,7 +31,6 @@ use ignore::overrides::{Override, OverrideBuilder};
 use ignore::types::{FileTypeDef, Types, TypesBuilder};
 use ignore::{Walk, WalkBuilder, WalkParallel};
 use log;
-use regex;
 use termcolor::{BufferWriter, ColorChoice, WriteColor};
 
 use crate::app;
@@ -42,7 +41,7 @@ use crate::path_printer::{PathPrinter, PathPrinterBuilder};
 use crate::search::{
     PatternMatcher, Printer, SearchWorker, SearchWorkerBuilder,
 };
-use crate::subject::SubjectBuilder;
+use crate::subject::{Subject, SubjectBuilder};
 use crate::Result;
 
 /// The command that ripgrep should execute based on the command line
@@ -325,6 +324,46 @@ impl Args {
             .build())
     }
 
+    /// Returns true if and only if `stat`-related sorting is required
+    pub fn needs_stat_sort(&self) -> bool {
+        return self.matches().sort_by().map_or(
+            false,
+            |sort_by| match sort_by.kind {
+                SortByKind::LastModified
+                | SortByKind::Created
+                | SortByKind::LastAccessed => sort_by.check().is_ok(),
+                _ => false,
+            },
+        );
+    }
+
+    /// Sort subjects if a sorter is specified, but only if the sort requires
+    /// stat calls. Non-stat related sorts are handled during file traversal
+    ///
+    /// This function assumes that it is known that a stat-related sort is
+    /// required, and does not check for it again.
+    ///
+    /// It is important that that precondition is fulfilled, since this function
+    /// consumes the subjects iterator, and is therefore a blocking function.
+    pub fn sort_by_stat<I>(&self, subjects: I) -> Vec<Subject>
+    where
+        I: Iterator<Item = Subject>,
+    {
+        let sorter = match self.matches().sort_by() {
+            Ok(v) => v,
+            Err(_) => return subjects.collect(),
+        };
+        use SortByKind::*;
+        let mut keyed = match sorter.kind {
+            LastModified => load_timestamps(subjects, |m| m.modified()),
+            LastAccessed => load_timestamps(subjects, |m| m.accessed()),
+            Created => load_timestamps(subjects, |m| m.created()),
+            _ => return subjects.collect(),
+        };
+        keyed.sort_by(|a, b| sort_by_option(&a.0, &b.0, sorter.reverse));
+        keyed.into_iter().map(|v| v.1).collect()
+    }
+
     /// Return a parallel walker that may use additional threads.
     pub fn walker_parallel(&self) -> Result<WalkParallel> {
         Ok(self
@@ -405,44 +444,23 @@ impl SortBy {
         Ok(())
     }
 
-    fn configure_walk_builder(self, builder: &mut WalkBuilder) {
-        // This isn't entirely optimal. In particular, we will wind up issuing
-        // a stat for many files redundantly. Aside from having potentially
-        // inconsistent results with respect to sorting, this is also slow.
-        // We could fix this here at the expense of memory by caching stat
-        // calls. A better fix would be to find a way to push this down into
-        // directory traversal itself, but that's a somewhat nasty change.
+    /// Load sorters only if they are applicable at the walk stage.
+    ///
+    /// In particular, sorts that involve `stat` calls are not loaded because
+    /// the walk inherently assumes that parent directories are aware of all its
+    /// decendent properties, but `stat` does not work that way.
+    fn configure_builder_sort(self, builder: &mut WalkBuilder) {
+        use SortByKind::*;
         match self.kind {
-            SortByKind::None => {}
-            SortByKind::Path => {
-                if self.reverse {
-                    builder.sort_by_file_name(|a, b| a.cmp(b).reverse());
-                } else {
-                    builder.sort_by_file_name(|a, b| a.cmp(b));
-                }
+            Path if self.reverse => {
+                builder.sort_by_file_name(|a, b| a.cmp(b).reverse());
             }
-            SortByKind::LastModified => {
-                builder.sort_by_file_path(move |a, b| {
-                    sort_by_metadata_time(a, b, self.reverse, |md| {
-                        md.modified()
-                    })
-                });
+            Path => {
+                builder.sort_by_file_name(|a, b| a.cmp(b));
             }
-            SortByKind::LastAccessed => {
-                builder.sort_by_file_path(move |a, b| {
-                    sort_by_metadata_time(a, b, self.reverse, |md| {
-                        md.accessed()
-                    })
-                });
-            }
-            SortByKind::Created => {
-                builder.sort_by_file_path(move |a, b| {
-                    sort_by_metadata_time(a, b, self.reverse, |md| {
-                        md.created()
-                    })
-                });
-            }
-        }
+            // these use `stat` calls and will be sorted in Args::sort_by_stat()
+            LastModified | LastAccessed | Created | None => {}
+        };
     }
 }
 
@@ -470,24 +488,6 @@ enum EncodingMode {
     /// always result in searching the raw bytes, regardless of their
     /// true encoding.
     Disabled,
-}
-
-impl EncodingMode {
-    /// Checks if an explicit encoding has been set. Returns false for
-    /// automatic BOM sniffing and no sniffing.
-    ///
-    /// This is only used to determine whether PCRE2 needs to have its own
-    /// UTF-8 checking enabled. If we have an explicit encoding set, then
-    /// we're always guaranteed to get UTF-8, so we can disable PCRE2's check.
-    /// Otherwise, we have no such guarantee, and must enable PCRE2' UTF-8
-    /// check.
-    #[cfg(feature = "pcre2")]
-    fn has_explicit_encoding(&self) -> bool {
-        match self {
-            EncodingMode::Some(_) => true,
-            _ => false,
-        }
-    }
 }
 
 impl ArgMatches {
@@ -671,6 +671,8 @@ impl ArgMatches {
             .multi_line(true)
             .unicode(self.unicode())
             .octal(false)
+            .fixed_strings(self.is_present("fixed-strings"))
+            .whole_line(self.is_present("line-regexp"))
             .word(self.is_present("word-regexp"));
         if self.is_present("multiline") {
             builder.dot_matches_new_line(self.is_present("multiline-dotall"));
@@ -697,12 +699,7 @@ impl ArgMatches {
         if let Some(limit) = self.dfa_size_limit()? {
             builder.dfa_size_limit(limit);
         }
-        let res = if self.is_present("fixed-strings") {
-            builder.build_literals(patterns)
-        } else {
-            builder.build(&patterns.join("|"))
-        };
-        match res {
+        match builder.build_many(patterns) {
             Ok(m) => Ok(m),
             Err(err) => Err(From::from(suggest_multiline(err.to_string()))),
         }
@@ -719,6 +716,8 @@ impl ArgMatches {
             .case_smart(self.case_smart())
             .caseless(self.case_insensitive())
             .multi_line(true)
+            .fixed_strings(self.is_present("fixed-strings"))
+            .whole_line(self.is_present("line-regexp"))
             .word(self.is_present("word-regexp"));
         // For whatever reason, the JIT craps out during regex compilation with
         // a "no more memory" error on 32 bit systems. So don't use it there.
@@ -732,14 +731,6 @@ impl ArgMatches {
         }
         if self.unicode() {
             builder.utf(true).ucp(true);
-            if self.encoding()?.has_explicit_encoding() {
-                // SAFETY: If an encoding was specified, then we're guaranteed
-                // to get valid UTF-8, so we can disable PCRE2's UTF checking.
-                // (Feeding invalid UTF-8 to PCRE2 is undefined behavior.)
-                unsafe {
-                    builder.disable_utf_check();
-                }
-            }
         }
         if self.is_present("multiline") {
             builder.dotall(self.is_present("multiline-dotall"));
@@ -747,7 +738,7 @@ impl ArgMatches {
         if self.is_present("crlf") {
             builder.crlf(true);
         }
-        Ok(builder.build(&patterns.join("|"))?)
+        Ok(builder.build_many(patterns)?)
     }
 
     /// Build a JSON printer that writes results to the given writer.
@@ -849,7 +840,8 @@ impl ArgMatches {
             .before_context(ctx_before)
             .after_context(ctx_after)
             .passthru(self.is_present("passthru"))
-            .memory_map(self.mmap_choice(paths));
+            .memory_map(self.mmap_choice(paths))
+            .stop_on_nonmatch(self.is_present("stop-on-nonmatch"));
         match self.encoding()? {
             EncodingMode::Some(enc) => {
                 builder.encoding(Some(enc));
@@ -901,12 +893,10 @@ impl ArgMatches {
             .git_exclude(!self.no_ignore_vcs() && !self.no_ignore_exclude())
             .require_git(!self.is_present("no-require-git"))
             .ignore_case_insensitive(self.ignore_file_case_insensitive());
-        if !self.no_ignore() {
+        if !self.no_ignore() && !self.no_ignore_dot() {
             builder.add_custom_ignore_filename(".rgignore");
         }
-        let sortby = self.sort_by()?;
-        sortby.check()?;
-        sortby.configure_walk_builder(&mut builder);
+        self.sort_by()?.configure_builder_sort(&mut builder);
         Ok(builder)
     }
 }
@@ -1026,10 +1016,10 @@ impl ArgMatches {
     /// If there was a problem parsing the values from the user as an integer,
     /// then an error is returned.
     fn contexts(&self) -> Result<(usize, usize)> {
-        let after = self.usize_of("after-context")?.unwrap_or(0);
-        let before = self.usize_of("before-context")?.unwrap_or(0);
         let both = self.usize_of("context")?.unwrap_or(0);
-        Ok(if both > 0 { (both, both) } else { (before, after) })
+        let after = self.usize_of("after-context")?.unwrap_or(both);
+        let before = self.usize_of("before-context")?.unwrap_or(both);
+        Ok((before, after))
     }
 
     /// Returns the unescaped context separator in UTF-8 bytes.
@@ -1086,7 +1076,6 @@ impl ArgMatches {
         }
 
         let label = match self.value_of_lossy("encoding") {
-            None if self.pcre2_unicode() => "utf-8".to_string(),
             None => return Ok(EncodingMode::Auto),
             Some(label) => label,
         };
@@ -1426,11 +1415,6 @@ impl ArgMatches {
     /// Get a sequence of all available patterns from the command line.
     /// This includes reading the -e/--regexp and -f/--file flags.
     ///
-    /// Note that if -F/--fixed-strings is set, then all patterns will be
-    /// escaped. If -x/--line-regexp is set, then all patterns are surrounded
-    /// by `^...$`. Other things, such as --word-regexp, are handled by the
-    /// regex matcher itself.
-    ///
     /// If any pattern is invalid UTF-8, then an error is returned.
     fn patterns(&self) -> Result<Vec<String>> {
         if self.is_present("files") || self.is_present("type-list") {
@@ -1471,16 +1455,6 @@ impl ArgMatches {
         Ok(pats)
     }
 
-    /// Returns a pattern that is guaranteed to produce an empty regular
-    /// expression that is valid in any position.
-    fn pattern_empty(&self) -> String {
-        // This would normally just be an empty string, which works on its
-        // own, but if the patterns are joined in a set of alternations, then
-        // you wind up with `foo|`, which is currently invalid in Rust's regex
-        // engine.
-        "(?:z{0})*".to_string()
-    }
-
     /// Converts an OsStr pattern to a String pattern. The pattern is escaped
     /// if -F/--fixed-strings is set.
     ///
@@ -1499,30 +1473,12 @@ impl ArgMatches {
     /// Applies additional processing on the given pattern if necessary
     /// (such as escaping meta characters or turning it into a line regex).
     fn pattern_from_string(&self, pat: String) -> String {
-        let pat = self.pattern_line(self.pattern_literal(pat));
         if pat.is_empty() {
-            self.pattern_empty()
-        } else {
-            pat
-        }
-    }
-
-    /// Returns the given pattern as a line pattern if the -x/--line-regexp
-    /// flag is set. Otherwise, the pattern is returned unchanged.
-    fn pattern_line(&self, pat: String) -> String {
-        if self.is_present("line-regexp") {
-            format!(r"^(?:{})$", pat)
-        } else {
-            pat
-        }
-    }
-
-    /// Returns the given pattern as a literal pattern if the
-    /// -F/--fixed-strings flag is set. Otherwise, the pattern is returned
-    /// unchanged.
-    fn pattern_literal(&self, pat: String) -> String {
-        if self.is_present("fixed-strings") {
-            regex::escape(&pat)
+            // This would normally just be an empty string, which works on its
+            // own, but if the patterns are joined in a set of alternations,
+            // then you wind up with `foo|`, which is currently invalid in
+            // Rust's regex engine.
+            "(?:)".to_string()
         } else {
             pat
         }
@@ -1653,12 +1609,6 @@ impl ArgMatches {
         // Unicode mode is enabled by default, so only disable it when
         // --no-unicode is given explicitly.
         !(self.is_present("no-unicode") || self.is_present("no-pcre2-unicode"))
-    }
-
-    /// Returns true if and only if PCRE2 is enabled and its Unicode mode is
-    /// enabled.
-    fn pcre2_unicode(&self) -> bool {
-        self.is_present("pcre2") && self.unicode()
     }
 
     /// Returns true if and only if file names containing each match should
@@ -1821,32 +1771,18 @@ fn u64_to_usize(arg_name: &str, value: Option<u64>) -> Result<Option<usize>> {
     }
 }
 
-/// Builds a comparator for sorting two files according to a system time
-/// extracted from the file's metadata.
-///
-/// If there was a problem extracting the metadata or if the time is not
-/// available, then both entries compare equal.
-fn sort_by_metadata_time<G>(
-    p1: &Path,
-    p2: &Path,
+/// Sorts by an optional parameter.
+//
+/// If parameter is found to be `None`, both entries compare equal.
+fn sort_by_option<T: Ord>(
+    p1: &Option<T>,
+    p2: &Option<T>,
     reverse: bool,
-    get_time: G,
-) -> cmp::Ordering
-where
-    G: Fn(&fs::Metadata) -> io::Result<SystemTime>,
-{
-    let t1 = match p1.metadata().and_then(|md| get_time(&md)) {
-        Ok(t) => t,
-        Err(_) => return cmp::Ordering::Equal,
-    };
-    let t2 = match p2.metadata().and_then(|md| get_time(&md)) {
-        Ok(t) => t,
-        Err(_) => return cmp::Ordering::Equal,
-    };
-    if reverse {
-        t1.cmp(&t2).reverse()
-    } else {
-        t1.cmp(&t2)
+) -> cmp::Ordering {
+    match (p1, p2, reverse) {
+        (Some(p1), Some(p2), true) => p1.cmp(&p2).reverse(),
+        (Some(p1), Some(p2), false) => p1.cmp(&p2),
+        _ => cmp::Ordering::Equal,
     }
 }
 
@@ -1899,4 +1835,18 @@ fn current_dir() -> Result<PathBuf> {
         err,
     )
     .into())
+}
+
+/// Tries to assign a timestamp to every `Subject` in the vector to help with
+/// sorting Subjects by time.
+fn load_timestamps<G>(
+    subjects: impl Iterator<Item = Subject>,
+    get_time: G,
+) -> Vec<(Option<SystemTime>, Subject)>
+where
+    G: Fn(&fs::Metadata) -> io::Result<SystemTime>,
+{
+    subjects
+        .map(|s| (s.path().metadata().and_then(|m| get_time(&m)).ok(), s))
+        .collect()
 }

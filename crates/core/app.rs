@@ -636,6 +636,7 @@ pub fn all_args_and_flags() -> Vec<RGArg> {
     flag_sort(&mut args);
     flag_sortr(&mut args);
     flag_stats(&mut args);
+    flag_stop_on_nonmatch(&mut args);
     flag_text(&mut args);
     flag_threads(&mut args);
     flag_trim(&mut args);
@@ -702,7 +703,7 @@ fn flag_after_context(args: &mut Vec<RGArg>) {
         "\
 Show NUM lines after each match.
 
-This overrides the --context and --passthru flags.
+This overrides the --passthru flag and partially overrides --context.
 "
     );
     let arg = RGArg::flag("after-context", "NUM")
@@ -710,8 +711,7 @@ This overrides the --context and --passthru flags.
         .help(SHORT)
         .long_help(LONG)
         .number()
-        .overrides("passthru")
-        .overrides("context");
+        .overrides("passthru");
     args.push(arg);
 }
 
@@ -772,7 +772,7 @@ fn flag_before_context(args: &mut Vec<RGArg>) {
         "\
 Show NUM lines before each match.
 
-This overrides the --context and --passthru flags.
+This overrides the --passthru flag and partially overrides --context.
 "
     );
     let arg = RGArg::flag("before-context", "NUM")
@@ -780,8 +780,7 @@ This overrides the --context and --passthru flags.
         .help(SHORT)
         .long_help(LONG)
         .number()
-        .overrides("passthru")
-        .overrides("context");
+        .overrides("passthru");
     args.push(arg);
 }
 
@@ -1013,8 +1012,7 @@ fn flag_context(args: &mut Vec<RGArg>) {
 Show NUM lines before and after each match. This is equivalent to providing
 both the -B/--before-context and -A/--after-context flags with the same value.
 
-This overrides both the -B/--before-context and -A/--after-context flags,
-in addition to the --passthru flag.
+This overrides the --passthru flag.
 "
     );
     let arg = RGArg::flag("context", "NUM")
@@ -1022,9 +1020,7 @@ in addition to the --passthru flag.
         .help(SHORT)
         .long_help(LONG)
         .number()
-        .overrides("passthru")
-        .overrides("before-context")
-        .overrides("after-context");
+        .overrides("passthru");
     args.push(arg);
 }
 
@@ -1730,6 +1726,8 @@ fn flag_line_number(args: &mut Vec<RGArg>) {
         "\
 Show line numbers (1-based). This is enabled by default when searching in a
 terminal.
+
+This flag overrides --no-line-number.
 "
     );
     let arg = RGArg::switch("line-number")
@@ -1744,6 +1742,8 @@ terminal.
         "\
 Suppress line numbers. This is enabled by default when not searching in a
 terminal.
+
+This flag overrides --line-number.
 "
     );
     let arg = RGArg::switch("no-line-number")
@@ -1946,13 +1946,16 @@ Nevertheless, if you only care about matches spanning at most one line, then it
 is always better to disable multiline mode.
 
 This flag can be disabled with --no-multiline.
+
+This overrides the --stop-on-nonmatch flag.
 "
     );
     let arg = RGArg::switch("multiline")
         .short("U")
         .help(SHORT)
         .long_help(LONG)
-        .overrides("no-multiline");
+        .overrides("no-multiline")
+        .overrides("stop-on-nonmatch");
     args.push(arg);
 
     let arg = RGArg::switch("no-multiline").hidden().overrides("multiline");
@@ -2601,8 +2604,8 @@ Do not print anything to stdout. If a match is found in a file, then ripgrep
 will stop searching. This is useful when ripgrep is used only for its exit
 code (which will be an error if no matches are found).
 
-When --files is used, then ripgrep will stop finding files after finding the
-first file that matches all ignore rules.
+When --files is used, ripgrep will stop finding files after finding the
+first file that does not match any ignore rules.
 "
     );
     let arg = RGArg::switch("quiet").short("q").help(SHORT).long_help(LONG);
@@ -2664,6 +2667,17 @@ Capture group indices (e.g., $5) and names (e.g., $foo) are supported in the
 replacement string. Capture group indices are numbered based on the position of
 the opening parenthesis of the group, where the leftmost such group is $1. The
 special $0 group corresponds to the entire match.
+
+The name of a group is formed by taking the longest string of letters, numbers
+and underscores (i.e. [_0-9A-Za-z]) after the $. For example, $1a will be
+replaced with the group named '1a', not the group at index 1. If the group's
+name contains characters that aren't letters, numbers or underscores, or you
+want to immediately follow the group with another string, the name should be
+put inside braces. For example, ${1}a will take the content of the group at
+index 1 and append 'a' to the end of it.
+
+If an index or name does not refer to a valid capture group, it will be
+replaced with an empty string.
 
 In shells such as Bash and zsh, you should wrap the pattern in single quotes
 instead of double quotes. Otherwise, capture group indices will be replaced by
@@ -2859,6 +2873,25 @@ This flag can be disabled with --no-stats.
     args.push(arg);
 
     let arg = RGArg::switch("no-stats").hidden().overrides("stats");
+    args.push(arg);
+}
+
+fn flag_stop_on_nonmatch(args: &mut Vec<RGArg>) {
+    const SHORT: &str = "Stop searching after a non-match.";
+    const LONG: &str = long!(
+        "\
+Enabling this option will cause ripgrep to stop reading a file once it
+encounters a non-matching line after it has encountered a matching line.
+This is useful if it is expected that all matches in a given file will be on
+sequential lines, for example due to the lines being sorted.
+
+This overrides the -U/--multiline flag.
+"
+    );
+    let arg = RGArg::switch("stop-on-nonmatch")
+        .help(SHORT)
+        .long_help(LONG)
+        .overrides("multiline");
     args.push(arg);
 }
 
