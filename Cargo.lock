@@ -412,6 +412,7 @@ dependencies = [
  "jemallocator",
  "lazy_static",
  "log",
+ "regex",
  "serde",
  "serde_derive",
  "serde_json",
