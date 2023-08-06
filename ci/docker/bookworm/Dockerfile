@@ -1,4 +1,4 @@
-FROM rust:1-bullseye
+FROM rust:1-bookworm
 
 RUN set -x && \
     apt-get update && \
