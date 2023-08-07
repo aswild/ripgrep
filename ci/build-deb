@@ -13,6 +13,7 @@ D="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 # This should be run from the root of the ripgrep repo.
 
 TARGET=''
+INSTALL_ARG=''
 while (( $# )); do
     case "$1" in
         --target)
@@ -22,6 +23,9 @@ while (( $# )); do
             fi
             TARGET="$2"
             shift
+            ;;
+        --install)
+            INSTALL_ARG='--install'
             ;;
     esac
     shift
@@ -48,7 +52,7 @@ fi
 # we force a debug build, copy out the man page (and shell completions)
 # produced from that build, put it into a predictable location and then build
 # the deb, which knows where to look.
-cargo build
+cargo check
 
 DEPLOY_DIR=deployment/deb
 OUT_DIR="$("$D"/cargo-out-dir target/debug/)"
@@ -62,4 +66,4 @@ version="$(git describe --tags --match='[0-9]*' --dirty=+)"
 
 # Since we're distributing the dpkg, we don't know whether the user will have
 # PCRE2 installed, so just do a static build.
-PCRE2_SYS_STATIC=1 cargo deb "${TARGET_ARGS[@]}" --deb-version "$version"
+PCRE2_SYS_STATIC=1 cargo deb --strip "${TARGET_ARGS[@]}" --deb-version "$version" $INSTALL_ARG
