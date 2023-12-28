@@ -53,6 +53,7 @@ pub(crate) struct LowArgs {
     pub(crate) engine: EngineChoice,
     pub(crate) field_context_separator: FieldContextSeparator,
     pub(crate) field_match_separator: FieldMatchSeparator,
+    pub(crate) file_search_regex: Option<regex::Regex>,
     pub(crate) fixed_strings: bool,
     pub(crate) follow: bool,
     pub(crate) glob_case_insensitive: bool,

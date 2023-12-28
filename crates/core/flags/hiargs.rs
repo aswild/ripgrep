@@ -50,6 +50,7 @@ pub(crate) struct HiArgs {
     engine: EngineChoice,
     field_context_separator: FieldContextSeparator,
     field_match_separator: FieldMatchSeparator,
+    file_search_regex: Option<regex::Regex>,
     file_separator: Option<Vec<u8>>,
     fixed_strings: bool,
     follow: bool,
@@ -267,6 +268,7 @@ impl HiArgs {
             engine: low.engine,
             field_context_separator: low.field_context_separator,
             field_match_separator: low.field_match_separator,
+            file_search_regex: low.file_search_regex,
             file_separator,
             fixed_strings: low.fixed_strings,
             follow: low.follow,
@@ -885,6 +887,7 @@ impl HiArgs {
             .same_file_system(self.one_file_system)
             .skip_stdout(matches!(self.mode, Mode::Search(_)))
             .overrides(self.globs.clone())
+            .file_search_regex(self.file_search_regex.clone())
             .types(self.types.clone())
             .hidden(!self.hidden)
             .parents(!self.no_ignore_parent)

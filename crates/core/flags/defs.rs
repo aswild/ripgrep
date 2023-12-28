@@ -64,6 +64,7 @@ pub(super) const FLAGS: &[&dyn Flag] = &[
     &Engine,
     &FieldContextSeparator,
     &FieldMatchSeparator,
+    &FileSearchRegex,
     &Files,
     &FilesWithMatches,
     &FilesWithoutMatch,
@@ -2077,6 +2078,68 @@ fn test_file() {
         let args = parse_low_raw([OsStr::from_bytes(&bytes)]).unwrap();
         assert_eq!(vec![PatternSource::File(path.clone())], args.patterns);
     }
+}
+
+/// -G/--file-search-regex
+#[derive(Debug)]
+struct FileSearchRegex;
+
+impl Flag for FileSearchRegex {
+    fn is_switch(&self) -> bool {
+        false
+    }
+    fn name_short(&self) -> Option<u8> {
+        Some(b'G')
+    }
+    fn name_long(&self) -> &'static str {
+        "file-search-regex"
+    }
+    fn doc_variable(&self) -> Option<&'static str> {
+        Some("PATTERN")
+    }
+    fn doc_category(&self) -> Category {
+        Category::Filter
+    }
+    fn doc_short(&self) -> &'static str {
+        "Search only files matching this regex"
+    }
+    fn doc_long(&self) -> &'static str {
+        r"
+After applying all other filtering, ignore, and filetype logic, match
+filenames against this regex and only search matching files.
+"
+    }
+    fn update(&self, v: FlagValue, args: &mut LowArgs) -> anyhow::Result<()> {
+        let r = regex::Regex::new(convert::str(&v.unwrap_value())?)
+            .context("Invalid file search regex")?;
+        args.file_search_regex = Some(r);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn test_file_search_regex() {
+    use regex::Regex;
+
+    #[track_caller]
+    fn check(args: &[&str], expected: Option<&str>) {
+        let args = parse_low_raw(args).unwrap();
+        assert_eq!(
+            args.file_search_regex.as_ref().map(Regex::as_str),
+            expected
+        );
+    }
+
+    check(&[], None);
+    check(&["-G", "foo"], Some("foo"));
+    check(&["-Gfoo"], Some("foo"));
+    check(&["--file-search-regex", "foo"], Some("foo"));
+    check(&["--file-search-regex=foo"], Some("foo"));
+
+    let res = parse_low_raw(&["-G", "(invalid regex"]);
+    let err = res.unwrap_err();
+    assert!(err.downcast::<regex::Error>().is_ok());
 }
 
 /// --files
