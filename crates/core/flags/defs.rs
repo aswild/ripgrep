@@ -4185,8 +4185,9 @@ When set, ripgrep will never read configuration files. When this flag is
 present, ripgrep will not respect the \fBRIPGREP_CONFIG_PATH\fP environment
 variable.
 .sp
-If ripgrep ever grows a feature to automatically read configuration files in
-pre-defined locations, then this flag will also disable that behavior as well.
+This flag also stops ripgrep from reading /etc/ripgreprc on Unix platforms,
+and will disable reading configuration files from any other future automatic
+locations as well.
 "
     }
 
