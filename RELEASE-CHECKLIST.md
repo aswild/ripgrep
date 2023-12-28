@@ -27,7 +27,8 @@
   `cargo update -p ripgrep` so that the `Cargo.lock` is updated. Commit the
   changes and create a new signed tag. Alternatively, use
   `cargo-up --no-push --no-release Cargo.toml {VERSION}` to automate this.
-* Push changes to GitHub, NOT including the tag. (But do not publish new
+* Run `cargo package` and ensure it succeeds.
+* Push changes to GitHub, NOT including the tag. (But do not publish a new
   version of ripgrep to crates.io yet.)
 * Once CI for `master` finishes successfully, push the version tag. (Trying to
   do this in one step seems to result in GitHub Actions not seeing the tag
@@ -40,9 +41,7 @@
   > tool that recursively searches the current directory for a regex pattern.
   > By default, ripgrep will respect gitignore rules and automatically skip
   > hidden files/directories and binary files.
-* Run `git checkout $version && ci/build-and-publish-deb $version` on a Linux
-  system that has `cargo deb` installed.
-* Run `git checkout $version && ci/build-and-publish-m2 $version` on a macOS
+* Run `git checkout {VERSION} && ci/build-and-publish-m2 {VERSION}` on a macOS
   system with Apple silicon.
 * Run `cargo publish`.
 * Run `ci/sha256-releases {VERSION} >> pkg/brew/ripgrep-bin.rb`. Then edit

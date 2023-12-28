@@ -24,12 +24,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
 
 [[package]]
-name = "base64"
-version = "0.21.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35636a1494ede3b646cc98f74f8e62c773a38a659ebc777a2cf26b9b74171df9"
-
-[[package]]
 name = "bstr"
 version = "1.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -124,7 +118,7 @@ checksum = "d2fabcfbdc87f4758337ca535fb41a6d701b65693ce38287d856d1674551ec9b"
 
 [[package]]
 name = "globset"
-version = "0.4.13"
+version = "0.4.14"
 dependencies = [
  "aho-corasick",
  "bstr",
@@ -138,7 +132,7 @@ dependencies = [
 
 [[package]]
 name = "grep"
-version = "0.2.12"
+version = "0.3.1"
 dependencies = [
  "grep-cli",
  "grep-matcher",
@@ -152,7 +146,7 @@ dependencies = [
 
 [[package]]
 name = "grep-cli"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "bstr",
  "globset",
@@ -164,7 +158,7 @@ dependencies = [
 
 [[package]]
 name = "grep-matcher"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "memchr",
  "regex",
@@ -172,7 +166,7 @@ dependencies = [
 
 [[package]]
 name = "grep-pcre2"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "grep-matcher",
  "log",
@@ -181,9 +175,8 @@ dependencies = [
 
 [[package]]
 name = "grep-printer"
-version = "0.1.7"
+version = "0.2.1"
 dependencies = [
- "base64",
  "bstr",
  "grep-matcher",
  "grep-regex",
@@ -196,7 +189,7 @@ dependencies = [
 
 [[package]]
 name = "grep-regex"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "bstr",
  "grep-matcher",
@@ -207,7 +200,7 @@ dependencies = [
 
 [[package]]
 name = "grep-searcher"
-version = "0.1.11"
+version = "0.1.13"
 dependencies = [
  "bstr",
  "encoding_rs",
@@ -222,7 +215,7 @@ dependencies = [
 
 [[package]]
 name = "ignore"
-version = "0.4.20"
+version = "0.4.21"
 dependencies = [
  "bstr",
  "crossbeam-channel",
@@ -304,9 +297,9 @@ checksum = "f665ee40bc4a3c5590afb1e9677db74a508659dfd71e126420da8274909a0167"
 
 [[package]]
 name = "memmap2"
-version = "0.8.0"
+version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43a5a03cefb0d953ec0be133036f14e109412fa594edc2f77227249db66cc3ed"
+checksum = "45fd3a57831bf88bc63f8cebc0cf956116276e97fef3966103e96416209f7c92"
 dependencies = [
  "libc",
 ]
@@ -408,7 +401,7 @@ checksum = "c08c74e62047bb2de4ff487b251e4a92e24f48745648451635cec7d591162d9f"
 
 [[package]]
 name = "ripgrep"
-version = "13.0.0"
+version = "14.0.3"
 dependencies = [
  "anyhow",
  "bstr",
