@@ -152,8 +152,18 @@ impl HiArgs {
         let pre_globs = preprocessor_globs(&state, &low)?;
 
         let color = match low.color {
-            ColorChoice::Auto if !state.is_terminal_stdout => {
-                ColorChoice::Never
+            ColorChoice::Auto => {
+                if !state.is_terminal_stdout {
+                    ColorChoice::Never
+                } else {
+                    // Don't color when we're only printing filenames
+                    match low.mode {
+                        Mode::Search(SearchMode::FilesWithMatches)
+                        | Mode::Search(SearchMode::FilesWithoutMatch)
+                        | Mode::Files => ColorChoice::Never,
+                        _ => ColorChoice::Auto,
+                    }
+                }
             }
             _ => low.color,
         };
