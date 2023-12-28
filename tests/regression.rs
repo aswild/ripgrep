@@ -380,6 +380,7 @@ rgtest!(r428_color_context_path, |dir: Dir, mut cmd: TestCommand| {
         "-N",
         "--colors=match:none",
         "--color=always",
+        "--hyperlink-format=",
         "foo",
     ]);
 
@@ -952,6 +953,19 @@ rgtest!(r1739_replacement_lineterm_match, |dir: Dir, mut cmd: TestCommand| {
     eqnice!("af\n", cmd.stdout());
 });
 
+// See: https://github.com/BurntSushi/ripgrep/issues/1757
+rgtest!(f1757, |dir: Dir, _: TestCommand| {
+    dir.create_dir("rust/target");
+    dir.create(".ignore", "rust/target");
+    dir.create("rust/source.rs", "needle");
+    dir.create("rust/target/rustdoc-output.html", "needle");
+
+    let args = &["--files-with-matches", "needle", "rust"];
+    eqnice!("rust/source.rs\n", dir.command().args(args).stdout());
+    let args = &["--files-with-matches", "needle", "./rust"];
+    eqnice!("./rust/source.rs\n", dir.command().args(args).stdout());
+});
+
 // See: https://github.com/BurntSushi/ripgrep/issues/1765
 rgtest!(r1765, |dir: Dir, mut cmd: TestCommand| {
     dir.create("test", "\n");
@@ -1032,17 +1046,10 @@ rgtest!(r1878, |dir: Dir, _: TestCommand| {
 
 // See: https://github.com/BurntSushi/ripgrep/issues/1891
 rgtest!(r1891, |dir: Dir, mut cmd: TestCommand| {
-    // TODO: Sadly, PCRE2 has different behavior here. Not clear why. We should
-    // look into this and see if there's a fix needed at the regex engine
-    // level.
-    if dir.is_pcre2() {
-        return;
-    }
-
     dir.create("test", "\n##\n");
     // N.B. We use -o here to force the issue to occur, which seems to only
     // happen when each match needs to be detected.
-    eqnice!("1:\n2:\n2:\n", cmd.args(&["-won", "", "test"]).stdout());
+    eqnice!("1:\n2:\n2:\n2:\n", cmd.args(&["-won", "", "test"]).stdout());
 });
 
 // See: https://github.com/BurntSushi/ripgrep/issues/2095

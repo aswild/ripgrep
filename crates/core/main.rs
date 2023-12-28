@@ -1,13 +1,11 @@
-use std::error;
-use std::io::{self, Write};
-use std::process;
-use std::sync::Mutex;
-use std::time::Instant;
+use std::{
+    io::{self, Write},
+    time::Instant,
+};
 
 use ignore::WalkState;
 
-use args::Args;
-use subject::Subject;
+use crate::{args::Args, subject::Subject};
 
 #[macro_use]
 mod messages;
@@ -16,7 +14,6 @@ mod app;
 mod args;
 mod config;
 mod logger;
-mod path_printer;
 mod search;
 mod subject;
 
@@ -43,16 +40,14 @@ mod subject;
 #[global_allocator]
 static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
-type Result<T> = ::std::result::Result<T, Box<dyn error::Error>>;
-
 fn main() {
     if let Err(err) = Args::parse().and_then(try_main) {
-        eprintln_locked!("{}", err);
-        process::exit(2);
+        eprintln_locked!("{:#}", err);
+        std::process::exit(2);
     }
 }
 
-fn try_main(args: Args) -> Result<()> {
+fn try_main(args: Args) -> anyhow::Result<()> {
     use args::Command::*;
 
     let matched = match args.command() {
@@ -65,18 +60,18 @@ fn try_main(args: Args) -> Result<()> {
         PCRE2Version => pcre2_version(&args),
     }?;
     if matched && (args.quiet() || !messages::errored()) {
-        process::exit(0)
+        std::process::exit(0)
     } else if messages::errored() {
-        process::exit(2)
+        std::process::exit(2)
     } else {
-        process::exit(1)
+        std::process::exit(1)
     }
 }
 
 /// The top-level entry point for single-threaded search. This recursively
 /// steps through the file list (current directory by default) and searches
 /// each file sequentially.
-fn search(args: &Args) -> Result<bool> {
+fn search(args: &Args) -> anyhow::Result<bool> {
     /// The meat of the routine is here. This lets us call the same iteration
     /// code over each file regardless of whether we stream over the files
     /// as they're produced by the underlying directory traversal or whether
@@ -85,7 +80,7 @@ fn search(args: &Args) -> Result<bool> {
         args: &Args,
         subjects: impl Iterator<Item = Subject>,
         started_at: std::time::Instant,
-    ) -> Result<bool> {
+    ) -> anyhow::Result<bool> {
         let quit_after_match = args.quit_after_match()?;
         let mut stats = args.stats()?;
         let mut searcher = args.search_worker(args.stdout())?;
@@ -141,15 +136,14 @@ fn search(args: &Args) -> Result<bool> {
 ///
 /// Requesting a sorted output from ripgrep (such as with `--sort path`) will
 /// automatically disable parallelism and hence sorting is not handled here.
-fn search_parallel(args: &Args) -> Result<bool> {
-    use std::sync::atomic::AtomicBool;
-    use std::sync::atomic::Ordering::SeqCst;
+fn search_parallel(args: &Args) -> anyhow::Result<bool> {
+    use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
 
     let quit_after_match = args.quit_after_match()?;
     let started_at = Instant::now();
     let subject_builder = args.subject_builder();
     let bufwtr = args.buffer_writer()?;
-    let stats = args.stats()?.map(Mutex::new);
+    let stats = args.stats()?.map(std::sync::Mutex::new);
     let matched = AtomicBool::new(false);
     let searched = AtomicBool::new(false);
     let mut searcher_err = None;
@@ -230,7 +224,7 @@ fn eprint_nothing_searched() {
 /// The top-level entry point for listing files without searching them. This
 /// recursively steps through the file list (current directory by default) and
 /// prints each path sequentially using a single thread.
-fn files(args: &Args) -> Result<bool> {
+fn files(args: &Args) -> anyhow::Result<bool> {
     /// The meat of the routine is here. This lets us call the same iteration
     /// code over each file regardless of whether we stream over the files
     /// as they're produced by the underlying directory traversal or whether
@@ -238,7 +232,7 @@ fn files(args: &Args) -> Result<bool> {
     fn iter(
         args: &Args,
         subjects: impl Iterator<Item = Subject>,
-    ) -> Result<bool> {
+    ) -> anyhow::Result<bool> {
         let quit_after_match = args.quit_after_match()?;
         let mut matched = false;
         let mut path_printer = args.path_printer(args.stdout())?;
@@ -248,7 +242,7 @@ fn files(args: &Args) -> Result<bool> {
             if quit_after_match {
                 break;
             }
-            if let Err(err) = path_printer.write_path(subject.path()) {
+            if let Err(err) = path_printer.write(subject.path()) {
                 // A broken pipe means graceful termination.
                 if err.kind() == io::ErrorKind::BrokenPipe {
                     break;
@@ -279,7 +273,7 @@ fn files(args: &Args) -> Result<bool> {
 ///
 /// Requesting a sorted output from ripgrep (such as with `--sort path`) will
 /// automatically disable parallelism and hence sorting is not handled here.
-fn files_parallel(args: &Args) -> Result<bool> {
+fn files_parallel(args: &Args) -> anyhow::Result<bool> {
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering::SeqCst;
     use std::sync::mpsc;
@@ -293,7 +287,7 @@ fn files_parallel(args: &Args) -> Result<bool> {
 
     let print_thread = thread::spawn(move || -> io::Result<()> {
         for subject in rx.iter() {
-            path_printer.write_path(subject.path())?;
+            path_printer.write(subject.path())?;
         }
         Ok(())
     });
@@ -331,7 +325,7 @@ fn files_parallel(args: &Args) -> Result<bool> {
 }
 
 /// The top-level entry point for --type-list.
-fn types(args: &Args) -> Result<bool> {
+fn types(args: &Args) -> anyhow::Result<bool> {
     let mut count = 0;
     let mut stdout = args.stdout();
     for def in args.type_defs()? {
@@ -353,9 +347,9 @@ fn types(args: &Args) -> Result<bool> {
 }
 
 /// The top-level entry point for --pcre2-version.
-fn pcre2_version(args: &Args) -> Result<bool> {
+fn pcre2_version(args: &Args) -> anyhow::Result<bool> {
     #[cfg(feature = "pcre2")]
-    fn imp(args: &Args) -> Result<bool> {
+    fn imp(args: &Args) -> anyhow::Result<bool> {
         use grep::pcre2;
 
         let mut stdout = args.stdout();
@@ -370,7 +364,7 @@ fn pcre2_version(args: &Args) -> Result<bool> {
     }
 
     #[cfg(not(feature = "pcre2"))]
-    fn imp(args: &Args) -> Result<bool> {
+    fn imp(args: &Args) -> anyhow::Result<bool> {
         let mut stdout = args.stdout();
         writeln!(stdout, "PCRE2 is not available in this build of ripgrep.")?;
         Ok(false)

@@ -1,48 +1,52 @@
-use std::cmp;
-use std::env;
-use std::ffi::{OsStr, OsString};
-use std::fs;
-use std::io::{self, Write};
-use std::path::{Path, PathBuf};
-use std::process;
-use std::sync::Arc;
-use std::time::SystemTime;
+use std::{
+    collections::HashSet,
+    env,
+    ffi::{OsStr, OsString},
+    io::{self, IsTerminal, Write},
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
-use clap;
-use grep::cli;
-use grep::matcher::LineTerminator;
+use {
+    clap,
+    grep::{
+        cli,
+        matcher::LineTerminator,
+        printer::{
+            default_color_specs, ColorSpecs, HyperlinkConfig,
+            HyperlinkEnvironment, HyperlinkFormat, JSONBuilder, PathPrinter,
+            PathPrinterBuilder, Standard, StandardBuilder, Stats, Summary,
+            SummaryBuilder, SummaryKind, JSON,
+        },
+        regex::{
+            RegexMatcher as RustRegexMatcher,
+            RegexMatcherBuilder as RustRegexMatcherBuilder,
+        },
+        searcher::{
+            BinaryDetection, Encoding, MmapChoice, Searcher, SearcherBuilder,
+        },
+    },
+    ignore::{
+        overrides::{Override, OverrideBuilder},
+        types::{FileTypeDef, Types, TypesBuilder},
+        {Walk, WalkBuilder, WalkParallel},
+    },
+    termcolor::{BufferWriter, ColorChoice, WriteColor},
+};
+
 #[cfg(feature = "pcre2")]
 use grep::pcre2::{
     RegexMatcher as PCRE2RegexMatcher,
     RegexMatcherBuilder as PCRE2RegexMatcherBuilder,
 };
-use grep::printer::{
-    default_color_specs, ColorSpecs, JSONBuilder, Standard, StandardBuilder,
-    Stats, Summary, SummaryBuilder, SummaryKind, JSON,
-};
-use grep::regex::{
-    RegexMatcher as RustRegexMatcher,
-    RegexMatcherBuilder as RustRegexMatcherBuilder,
-};
-use grep::searcher::{
-    BinaryDetection, Encoding, MmapChoice, Searcher, SearcherBuilder,
-};
-use ignore::overrides::{Override, OverrideBuilder};
-use ignore::types::{FileTypeDef, Types, TypesBuilder};
-use ignore::{Walk, WalkBuilder, WalkParallel};
-use log;
-use termcolor::{BufferWriter, ColorChoice, WriteColor};
 
-use crate::app;
-use crate::config;
-use crate::logger::Logger;
-use crate::messages::{set_ignore_messages, set_messages};
-use crate::path_printer::{PathPrinter, PathPrinterBuilder};
-use crate::search::{
-    PatternMatcher, Printer, SearchWorker, SearchWorkerBuilder,
+use crate::{
+    app, config,
+    logger::Logger,
+    messages::{set_ignore_messages, set_messages},
+    search::{PatternMatcher, Printer, SearchWorker, SearchWorkerBuilder},
+    subject::{Subject, SubjectBuilder},
 };
-use crate::subject::{Subject, SubjectBuilder};
-use crate::Result;
 
 /// The command that ripgrep should execute based on the command line
 /// configuration.
@@ -124,7 +128,7 @@ impl Args {
     /// ripgrep, then print the version and exit.
     ///
     /// Also, initialize a global logger.
-    pub fn parse() -> Result<Args> {
+    pub fn parse() -> anyhow::Result<Args> {
         // We parse the args given on CLI. This does not include args from
         // the config. We use the CLI args as an initial configuration while
         // trying to parse config files. If a config file exists and has
@@ -135,7 +139,7 @@ impl Args {
         set_ignore_messages(!early_matches.is_present("no-ignore-messages"));
 
         if let Err(err) = Logger::init() {
-            return Err(format!("failed to initialize logger: {}", err).into());
+            anyhow::bail!("failed to initialize logger: {err}");
         }
         if early_matches.is_present("trace") {
             log::set_max_level(log::LevelFilter::Trace);
@@ -189,7 +193,7 @@ impl Args {
     /// search results.
     ///
     /// The returned printer will write results to the given writer.
-    fn printer<W: WriteColor>(&self, wtr: W) -> Result<Printer<W>> {
+    fn printer<W: WriteColor>(&self, wtr: W) -> anyhow::Result<Printer<W>> {
         match self.matches().output_kind() {
             OutputKind::Standard => {
                 let separator_search = self.command() == Command::Search;
@@ -213,7 +217,7 @@ impl Args {
 impl Args {
     /// Create a new buffer writer for multi-threaded printing with color
     /// support.
-    pub fn buffer_writer(&self) -> Result<BufferWriter> {
+    pub fn buffer_writer(&self) -> anyhow::Result<BufferWriter> {
         let mut wtr = BufferWriter::stdout(self.matches().color_choice());
         wtr.separator(self.matches().file_separator()?);
         Ok(wtr)
@@ -231,10 +235,11 @@ impl Args {
     pub fn path_printer<W: WriteColor>(
         &self,
         wtr: W,
-    ) -> Result<PathPrinter<W>> {
+    ) -> anyhow::Result<PathPrinter<W>> {
         let mut builder = PathPrinterBuilder::new();
         builder
             .color_specs(self.matches().color_specs()?)
+            .hyperlink(self.matches().hyperlink_config()?)
             .separator(self.matches().path_separator()?)
             .terminator(self.matches().path_terminator().unwrap_or(b'\n'));
         Ok(builder.build(wtr))
@@ -247,7 +252,7 @@ impl Args {
 
     /// Returns true if and only if the search should quit after finding the
     /// first match.
-    pub fn quit_after_match(&self) -> Result<bool> {
+    pub fn quit_after_match(&self) -> anyhow::Result<bool> {
         Ok(self.matches().is_present("quiet") && self.stats()?.is_none())
     }
 
@@ -257,7 +262,7 @@ impl Args {
     pub fn search_worker<W: WriteColor>(
         &self,
         wtr: W,
-    ) -> Result<SearchWorker<W>> {
+    ) -> anyhow::Result<SearchWorker<W>> {
         let matches = self.matches();
         let matcher = self.matcher().clone();
         let printer = self.printer(wtr)?;
@@ -278,7 +283,7 @@ impl Args {
     ///
     /// When this returns a `Stats` value, then it is guaranteed that the
     /// search worker will be configured to track statistics as well.
-    pub fn stats(&self) -> Result<Option<Stats>> {
+    pub fn stats(&self) -> anyhow::Result<Option<Stats>> {
         Ok(if self.command().is_search() && self.matches().stats() {
             Some(Stats::new())
         } else {
@@ -312,12 +317,12 @@ impl Args {
     ///
     /// If there was a problem reading and parsing the type definitions, then
     /// this returns an error.
-    pub fn type_defs(&self) -> Result<Vec<FileTypeDef>> {
+    pub fn type_defs(&self) -> anyhow::Result<Vec<FileTypeDef>> {
         Ok(self.matches().types()?.definitions().to_vec())
     }
 
     /// Return a walker that never uses additional threads.
-    pub fn walker(&self) -> Result<Walk> {
+    pub fn walker(&self) -> anyhow::Result<Walk> {
         Ok(self
             .matches()
             .walker_builder(self.paths(), self.0.threads)?
@@ -365,7 +370,7 @@ impl Args {
     }
 
     /// Return a parallel walker that may use additional threads.
-    pub fn walker_parallel(&self) -> Result<WalkParallel> {
+    pub fn walker_parallel(&self) -> anyhow::Result<WalkParallel> {
         Ok(self
             .matches()
             .walker_builder(self.paths(), self.0.threads)?
@@ -428,7 +433,7 @@ impl SortBy {
 
     /// Try to check that the sorting criteria selected is actually supported.
     /// If it isn't, then an error is returned.
-    fn check(&self) -> Result<()> {
+    fn check(&self) -> anyhow::Result<()> {
         match self.kind {
             SortByKind::None | SortByKind::Path => {}
             SortByKind::LastModified => {
@@ -503,7 +508,7 @@ impl ArgMatches {
     ///
     /// If there are no additional arguments from the environment (e.g., a
     /// config file), then the given matches are returned as is.
-    fn reconfigure(self) -> Result<ArgMatches> {
+    fn reconfigure(self) -> anyhow::Result<ArgMatches> {
         // If the end user says no config, then respect it.
         if self.is_present("no-config") {
             log::debug!(
@@ -528,7 +533,7 @@ impl ArgMatches {
 
     /// Convert the result of parsing CLI arguments into ripgrep's higher level
     /// configuration structure.
-    fn to_args(self) -> Result<Args> {
+    fn to_args(self) -> anyhow::Result<Args> {
         // We compute these once since they could be large.
         let patterns = self.patterns()?;
         let matcher = self.matcher(&patterns)?;
@@ -585,7 +590,7 @@ impl ArgMatches {
     ///
     /// If there was a problem building the matcher (e.g., a syntax error),
     /// then this returns an error.
-    fn matcher(&self, patterns: &[String]) -> Result<PatternMatcher> {
+    fn matcher(&self, patterns: &[String]) -> anyhow::Result<PatternMatcher> {
         if self.is_present("pcre2") {
             self.matcher_engine("pcre2", patterns)
         } else if self.is_present("auto-hybrid-regex") {
@@ -605,13 +610,13 @@ impl ArgMatches {
         &self,
         engine: &str,
         patterns: &[String],
-    ) -> Result<PatternMatcher> {
+    ) -> anyhow::Result<PatternMatcher> {
         match engine {
             "default" => {
                 let matcher = match self.matcher_rust(patterns) {
                     Ok(matcher) => matcher,
                     Err(err) => {
-                        return Err(From::from(suggest(err.to_string())));
+                        anyhow::bail!(suggest(err.to_string()));
                     }
                 };
                 Ok(PatternMatcher::RustRegex(matcher))
@@ -622,9 +627,9 @@ impl ArgMatches {
                 Ok(PatternMatcher::PCRE2(matcher))
             }
             #[cfg(not(feature = "pcre2"))]
-            "pcre2" => Err(From::from(
+            "pcre2" => anyhow::bail!(
                 "PCRE2 is not available in this build of ripgrep",
-            )),
+            ),
             "auto" => {
                 let rust_err = match self.matcher_rust(patterns) {
                     Ok(matcher) => {
@@ -641,21 +646,18 @@ impl ArgMatches {
                     Ok(matcher) => return Ok(matcher),
                     Err(err) => err,
                 };
-                Err(From::from(format!(
+                let divider = "~".repeat(79);
+                anyhow::bail!(
                     "regex could not be compiled with either the default \
                      regex engine or with PCRE2.\n\n\
-                     default regex engine error:\n{}\n{}\n{}\n\n\
-                     PCRE2 regex engine error:\n{}",
-                    "~".repeat(79),
-                    rust_err,
-                    "~".repeat(79),
-                    pcre_err,
-                )))
+                     default regex engine error:\n\
+                     {divider}\n\
+                     {rust_err}\n\
+                     {divider}\n\n\
+                     PCRE2 regex engine error:\n{pcre_err}",
+                );
             }
-            _ => Err(From::from(format!(
-                "unrecognized regex engine '{}'",
-                engine
-            ))),
+            _ => anyhow::bail!("unrecognized regex engine '{engine}'"),
         }
     }
 
@@ -663,7 +665,10 @@ impl ArgMatches {
     ///
     /// If there was a problem building the matcher (such as a regex syntax
     /// error), then an error is returned.
-    fn matcher_rust(&self, patterns: &[String]) -> Result<RustRegexMatcher> {
+    fn matcher_rust(
+        &self,
+        patterns: &[String],
+    ) -> anyhow::Result<RustRegexMatcher> {
         let mut builder = RustRegexMatcherBuilder::new();
         builder
             .case_smart(self.case_smart())
@@ -701,7 +706,7 @@ impl ArgMatches {
         }
         match builder.build_many(patterns) {
             Ok(m) => Ok(m),
-            Err(err) => Err(From::from(suggest_multiline(err.to_string()))),
+            Err(err) => anyhow::bail!(suggest_multiline(err.to_string())),
         }
     }
 
@@ -710,7 +715,10 @@ impl ArgMatches {
     /// If there was a problem building the matcher (such as a regex syntax
     /// error), then an error is returned.
     #[cfg(feature = "pcre2")]
-    fn matcher_pcre2(&self, patterns: &[String]) -> Result<PCRE2RegexMatcher> {
+    fn matcher_pcre2(
+        &self,
+        patterns: &[String],
+    ) -> anyhow::Result<PCRE2RegexMatcher> {
         let mut builder = PCRE2RegexMatcherBuilder::new();
         builder
             .case_smart(self.case_smart())
@@ -742,7 +750,7 @@ impl ArgMatches {
     }
 
     /// Build a JSON printer that writes results to the given writer.
-    fn printer_json<W: io::Write>(&self, wtr: W) -> Result<JSON<W>> {
+    fn printer_json<W: io::Write>(&self, wtr: W) -> anyhow::Result<JSON<W>> {
         let mut builder = JSONBuilder::new();
         builder
             .pretty(false)
@@ -768,10 +776,11 @@ impl ArgMatches {
         paths: &[PathBuf],
         wtr: W,
         separator_search: bool,
-    ) -> Result<Standard<W>> {
+    ) -> anyhow::Result<Standard<W>> {
         let mut builder = StandardBuilder::new();
         builder
             .color_specs(self.color_specs()?)
+            .hyperlink(self.hyperlink_config()?)
             .stats(self.stats())
             .heading(self.heading())
             .path(self.with_filename(paths))
@@ -806,11 +815,12 @@ impl ArgMatches {
         &self,
         paths: &[PathBuf],
         wtr: W,
-    ) -> Result<Summary<W>> {
+    ) -> anyhow::Result<Summary<W>> {
         let mut builder = SummaryBuilder::new();
         builder
             .kind(self.summary_kind().expect("summary format"))
             .color_specs(self.color_specs()?)
+            .hyperlink(self.hyperlink_config()?)
             .stats(self.stats())
             .path(self.with_filename(paths))
             .max_matches(self.max_count()?)
@@ -822,7 +832,7 @@ impl ArgMatches {
     }
 
     /// Build a searcher from the command line parameters.
-    fn searcher(&self, paths: &[PathBuf]) -> Result<Searcher> {
+    fn searcher(&self, paths: &[PathBuf]) -> anyhow::Result<Searcher> {
         let (ctx_before, ctx_after) = self.contexts()?;
         let line_term = if self.is_present("crlf") {
             LineTerminator::crlf()
@@ -863,7 +873,7 @@ impl ArgMatches {
         &self,
         paths: &[PathBuf],
         threads: usize,
-    ) -> Result<WalkBuilder> {
+    ) -> anyhow::Result<WalkBuilder> {
         let mut builder = WalkBuilder::new(&paths[0]);
         for path in &paths[1..] {
             builder.add(path);
@@ -978,7 +988,9 @@ impl ArgMatches {
                 || self.output_kind() == OutputKind::Summary
             {
                 ColorChoice::Never
-            } else if cli::is_tty_stdout() || self.is_present("pretty") {
+            } else if std::io::stdout().is_terminal()
+                || self.is_present("pretty")
+            {
                 ColorChoice::Auto
             } else {
                 ColorChoice::Never
@@ -992,7 +1004,7 @@ impl ArgMatches {
     ///
     /// If the was a problem parsing any of the provided specs, then an error
     /// is returned.
-    fn color_specs(&self) -> Result<ColorSpecs> {
+    fn color_specs(&self) -> anyhow::Result<ColorSpecs> {
         // Start with a default set of color specs.
         let mut specs = default_color_specs();
         for spec_str in self.values_of_lossy_vec("colors") {
@@ -1015,7 +1027,7 @@ impl ArgMatches {
     ///
     /// If there was a problem parsing the values from the user as an integer,
     /// then an error is returned.
-    fn contexts(&self) -> Result<(usize, usize)> {
+    fn contexts(&self) -> anyhow::Result<(usize, usize)> {
         let both = self.usize_of("context")?.unwrap_or(0);
         let after = self.usize_of("after-context")?.unwrap_or(both);
         let before = self.usize_of("before-context")?.unwrap_or(both);
@@ -1059,7 +1071,7 @@ impl ArgMatches {
     }
 
     /// Parse the dfa-size-limit argument option into a byte count.
-    fn dfa_size_limit(&self) -> Result<Option<usize>> {
+    fn dfa_size_limit(&self) -> anyhow::Result<Option<usize>> {
         let r = self.parse_human_readable_size("dfa-size-limit")?;
         u64_to_usize("dfa-size-limit", r)
     }
@@ -1070,7 +1082,7 @@ impl ArgMatches {
     /// if set to automatic, the Searcher will do BOM sniffing for UTF-16
     /// and transcode seamlessly. If disabled, no BOM sniffing nor transcoding
     /// will occur.
-    fn encoding(&self) -> Result<EncodingMode> {
+    fn encoding(&self) -> anyhow::Result<EncodingMode> {
         if self.is_present("no-encoding") {
             return Ok(EncodingMode::Auto);
         }
@@ -1090,7 +1102,7 @@ impl ArgMatches {
     }
 
     /// Returns a matcher for the file search regex
-    fn file_search_regex(&self) -> Result<Option<regex::Regex>> {
+    fn file_search_regex(&self) -> anyhow::Result<Option<regex::Regex>> {
         self.value_of_lossy("file-search-regex")
             .map(|re| regex::Regex::new(&re))
             .transpose()
@@ -1098,7 +1110,7 @@ impl ArgMatches {
     }
 
     /// Return the file separator to use based on the CLI configuration.
-    fn file_separator(&self) -> Result<Option<Vec<u8>>> {
+    fn file_separator(&self) -> anyhow::Result<Option<Vec<u8>>> {
         // File separators are only used for the standard grep-line format.
         if self.output_kind() != OutputKind::Standard {
             return Ok(None);
@@ -1120,7 +1132,7 @@ impl ArgMatches {
         if self.is_present("no-heading") || self.is_present("vimgrep") {
             false
         } else {
-            cli::is_tty_stdout()
+            std::io::stdout().is_terminal()
                 || self.is_present("heading")
                 || self.is_present("pretty")
         }
@@ -1130,6 +1142,28 @@ impl ArgMatches {
     /// searched.
     fn hidden(&self) -> bool {
         self.is_present("hidden") || self.unrestricted_count() >= 2
+    }
+
+    /// Returns the hyperlink pattern to use. A default pattern suitable
+    /// for the current system is used if the value is not set.
+    ///
+    /// If an invalid pattern is provided, then an error is returned.
+    fn hyperlink_config(&self) -> anyhow::Result<HyperlinkConfig> {
+        let mut env = HyperlinkEnvironment::new();
+        env.host(hostname(self.value_of_os("hostname-bin")))
+            .wsl_prefix(wsl_prefix());
+        let fmt: HyperlinkFormat =
+            match self.value_of_lossy("hyperlink-format") {
+                None => "none".parse().unwrap(),
+                Some(format) => match format.parse() {
+                    Ok(format) => format,
+                    Err(err) => {
+                        anyhow::bail!("invalid hyperlink format: {err}");
+                    }
+                },
+            };
+        log::debug!("hyperlink format: {:?}", fmt.to_string());
+        Ok(HyperlinkConfig::new(env, fmt))
     }
 
     /// Returns true if ignore files should be processed case insensitively.
@@ -1177,7 +1211,7 @@ impl ArgMatches {
         // generally want to show line numbers by default when printing to a
         // tty for human consumption, except for one interesting case: when
         // we're only searching stdin. This makes pipelines work as expected.
-        (cli::is_tty_stdout() && !self.is_only_stdin(paths))
+        (std::io::stdout().is_terminal() && !self.is_only_stdin(paths))
             || self.is_present("line-number")
             || self.is_present("column")
             || self.is_present("pretty")
@@ -1187,7 +1221,7 @@ impl ArgMatches {
     /// The maximum number of columns allowed on each line.
     ///
     /// If `0` is provided, then this returns `None`.
-    fn max_columns(&self) -> Result<Option<u64>> {
+    fn max_columns(&self) -> anyhow::Result<Option<u64>> {
         Ok(self.usize_of_nonzero("max-columns")?.map(|n| n as u64))
     }
 
@@ -1198,12 +1232,12 @@ impl ArgMatches {
     }
 
     /// The maximum number of matches permitted.
-    fn max_count(&self) -> Result<Option<u64>> {
+    fn max_count(&self) -> anyhow::Result<Option<u64>> {
         Ok(self.usize_of("max-count")?.map(|n| n as u64))
     }
 
     /// Parses the max-filesize argument option into a byte count.
-    fn max_file_size(&self) -> Result<Option<u64>> {
+    fn max_file_size(&self) -> anyhow::Result<Option<u64>> {
         self.parse_human_readable_size("max-filesize")
     }
 
@@ -1294,7 +1328,7 @@ impl ArgMatches {
     }
 
     /// Builds the set of glob overrides from the command line flags.
-    fn overrides(&self) -> Result<Override> {
+    fn overrides(&self) -> anyhow::Result<Override> {
         let globs = self.values_of_lossy_vec("glob");
         let iglobs = self.values_of_lossy_vec("iglob");
         if globs.is_empty() && iglobs.is_empty() {
@@ -1361,7 +1395,7 @@ impl ArgMatches {
     ///
     /// If the provided path separator is more than a single byte, then an
     /// error is returned.
-    fn path_separator(&self) -> Result<Option<u8>> {
+    fn path_separator(&self) -> anyhow::Result<Option<u8>> {
         let sep = match self.value_of_os("path-separator") {
             None => return Ok(None),
             Some(sep) => cli::unescape_os(&sep),
@@ -1369,14 +1403,14 @@ impl ArgMatches {
         if sep.is_empty() {
             Ok(None)
         } else if sep.len() > 1 {
-            Err(From::from(format!(
+            anyhow::bail!(
                 "A path separator must be exactly one byte, but \
                  the given separator is {} bytes: {}\n\
                  In some shells on Windows '/' is automatically \
                  expanded. Use '//' instead.",
                 sep.len(),
                 cli::escape(&sep),
-            )))
+            )
         } else {
             Ok(Some(sep[0]))
         }
@@ -1416,39 +1450,48 @@ impl ArgMatches {
     /// This includes reading the -e/--regexp and -f/--file flags.
     ///
     /// If any pattern is invalid UTF-8, then an error is returned.
-    fn patterns(&self) -> Result<Vec<String>> {
+    fn patterns(&self) -> anyhow::Result<Vec<String>> {
         if self.is_present("files") || self.is_present("type-list") {
             return Ok(vec![]);
         }
+        let mut seen = HashSet::new();
         let mut pats = vec![];
+        let mut add = |pat: String| {
+            if !seen.contains(&pat) {
+                seen.insert(pat.clone());
+                pats.push(pat);
+            }
+        };
         match self.values_of_os("regexp") {
             None => {
                 if self.values_of_os("file").is_none() {
                     if let Some(os_pat) = self.value_of_os("pattern") {
-                        pats.push(self.pattern_from_os_str(os_pat)?);
+                        add(self.pattern_from_os_str(os_pat)?);
                     }
                 }
             }
             Some(os_pats) => {
                 for os_pat in os_pats {
-                    pats.push(self.pattern_from_os_str(os_pat)?);
+                    add(self.pattern_from_os_str(os_pat)?);
                 }
             }
         }
         if let Some(paths) = self.values_of_os("file") {
             for path in paths {
                 if path == "-" {
-                    pats.extend(
-                        cli::patterns_from_stdin()?
-                            .into_iter()
-                            .map(|p| self.pattern_from_string(p)),
-                    );
+                    let it = cli::patterns_from_stdin()?
+                        .into_iter()
+                        .map(|p| self.pattern_from_string(p));
+                    for pat in it {
+                        add(pat);
+                    }
                 } else {
-                    pats.extend(
-                        cli::patterns_from_path(path)?
-                            .into_iter()
-                            .map(|p| self.pattern_from_string(p)),
-                    );
+                    let it = cli::patterns_from_path(path)?
+                        .into_iter()
+                        .map(|p| self.pattern_from_string(p));
+                    for pat in it {
+                        add(pat);
+                    }
                 }
             }
         }
@@ -1459,7 +1502,7 @@ impl ArgMatches {
     /// if -F/--fixed-strings is set.
     ///
     /// If the pattern is not valid UTF-8, then an error is returned.
-    fn pattern_from_os_str(&self, pat: &OsStr) -> Result<String> {
+    fn pattern_from_os_str(&self, pat: &OsStr) -> anyhow::Result<String> {
         let s = cli::pattern_from_os(pat)?;
         Ok(self.pattern_from_str(s))
     }
@@ -1499,7 +1542,7 @@ impl ArgMatches {
     /// Builds the set of globs for filtering files to apply to the --pre
     /// flag. If no --pre-globs are available, then this always returns an
     /// empty set of globs.
-    fn preprocessor_globs(&self) -> Result<Override> {
+    fn preprocessor_globs(&self) -> anyhow::Result<Override> {
         let globs = self.values_of_lossy_vec("pre-glob");
         if globs.is_empty() {
             return Ok(Override::empty());
@@ -1512,7 +1555,7 @@ impl ArgMatches {
     }
 
     /// Parse the regex-size-limit argument option into a byte count.
-    fn regex_size_limit(&self) -> Result<Option<usize>> {
+    fn regex_size_limit(&self) -> anyhow::Result<Option<usize>> {
         let r = self.parse_human_readable_size("regex-size-limit")?;
         u64_to_usize("regex-size-limit", r)
     }
@@ -1523,7 +1566,7 @@ impl ArgMatches {
     }
 
     /// Returns the sorting criteria based on command line parameters.
-    fn sort_by(&self) -> Result<SortBy> {
+    fn sort_by(&self) -> anyhow::Result<SortBy> {
         // For backcompat, continue supporting deprecated --sort-files flag.
         if self.is_present("sort-files") {
             return Ok(SortBy::asc(SortByKind::Path));
@@ -1570,18 +1613,18 @@ impl ArgMatches {
     }
 
     /// Return the number of threads that should be used for parallelism.
-    fn threads(&self) -> Result<usize> {
+    fn threads(&self) -> anyhow::Result<usize> {
         if self.sort_by()?.kind != SortByKind::None {
             return Ok(1);
         }
         let threads = self.usize_of("threads")?.unwrap_or(0);
         let available =
             std::thread::available_parallelism().map_or(1, |n| n.get());
-        Ok(if threads == 0 { cmp::min(12, available) } else { threads })
+        Ok(if threads == 0 { std::cmp::min(12, available) } else { threads })
     }
 
     /// Builds a file type matcher from the command line flags.
-    fn types(&self) -> Result<Types> {
+    fn types(&self) -> anyhow::Result<Types> {
         let mut builder = TypesBuilder::new();
         builder.add_defaults();
         for ty in self.values_of_lossy_vec("type-clear") {
@@ -1641,7 +1684,7 @@ impl ArgMatches {
     ///
     /// If the number is zero, then it is considered absent and `None` is
     /// returned.
-    fn usize_of_nonzero(&self, name: &str) -> Result<Option<usize>> {
+    fn usize_of_nonzero(&self, name: &str) -> anyhow::Result<Option<usize>> {
         let n = match self.usize_of(name)? {
             None => return Ok(None),
             Some(n) => n,
@@ -1651,7 +1694,7 @@ impl ArgMatches {
 
     /// Safely reads an arg value with the given name, and if it's present,
     /// tries to parse it as a usize value.
-    fn usize_of(&self, name: &str) -> Result<Option<usize>> {
+    fn usize_of(&self, name: &str) -> anyhow::Result<Option<usize>> {
         match self.value_of_lossy(name) {
             None => Ok(None),
             Some(v) => v.parse().map(Some).map_err(From::from),
@@ -1665,7 +1708,7 @@ impl ArgMatches {
     fn parse_human_readable_size(
         &self,
         arg_name: &str,
-    ) -> Result<Option<u64>> {
+    ) -> anyhow::Result<Option<u64>> {
         let size = match self.value_of_lossy(arg_name) {
             None => return Ok(None),
             Some(size) => size,
@@ -1744,11 +1787,10 @@ and look-around.",
 fn suggest_multiline(msg: String) -> String {
     if msg.contains("the literal") && msg.contains("not allowed") {
         format!(
-            "{}
+            "{msg}
 
 Consider enabling multiline mode with the --multiline flag (or -U for short).
 When multiline mode is enabled, new line characters can be matched.",
-            msg
         )
     } else {
         msg
@@ -1757,18 +1799,16 @@ When multiline mode is enabled, new line characters can be matched.",
 
 /// Convert the result of parsing a human readable file size to a `usize`,
 /// failing if the type does not fit.
-fn u64_to_usize(arg_name: &str, value: Option<u64>) -> Result<Option<usize>> {
+fn u64_to_usize(
+    arg_name: &str,
+    value: Option<u64>,
+) -> anyhow::Result<Option<usize>> {
     use std::usize;
 
-    let value = match value {
-        None => return Ok(None),
-        Some(value) => value,
-    };
-    if value <= usize::MAX as u64 {
-        Ok(Some(value as usize))
-    } else {
-        Err(From::from(format!("number too large for {}", arg_name)))
-    }
+    let Some(value) = value else { return Ok(None) };
+    usize::try_from(value)
+        .map_err(|_| anyhow::anyhow!("number too large for {arg_name}"))
+        .map(Some)
 }
 
 /// Sorts by an optional parameter.
@@ -1778,11 +1818,11 @@ fn sort_by_option<T: Ord>(
     p1: &Option<T>,
     p2: &Option<T>,
     reverse: bool,
-) -> cmp::Ordering {
+) -> std::cmp::Ordering {
     match (p1, p2, reverse) {
         (Some(p1), Some(p2), true) => p1.cmp(&p2).reverse(),
         (Some(p1), Some(p2), false) => p1.cmp(&p2),
-        _ => cmp::Ordering::Equal,
+        _ => std::cmp::Ordering::Equal,
     }
 }
 
@@ -1792,7 +1832,7 @@ fn sort_by_option<T: Ord>(
 /// corresponds to a `--help` or `--version` request. In which case, the
 /// corresponding output is printed and the current process is exited
 /// successfully.
-fn clap_matches<I, T>(args: I) -> Result<clap::ArgMatches<'static>>
+fn clap_matches<I, T>(args: I) -> anyhow::Result<clap::ArgMatches<'static>>
 where
     I: IntoIterator<Item = T>,
     T: Into<OsString> + Clone,
@@ -1811,7 +1851,7 @@ where
     // (This is the point of this helper function. clap's functionality for
     // doing this will panic on a broken pipe error.)
     let _ = write!(io::stdout(), "{}", err);
-    process::exit(0);
+    std::process::exit(0);
 }
 
 /// Attempts to discover the current working directory. This mostly just defers
@@ -1819,7 +1859,7 @@ where
 /// a directory that no longer exists. We attempt some fallback mechanisms,
 /// such as querying the PWD environment variable, but otherwise return an
 /// error.
-fn current_dir() -> Result<PathBuf> {
+fn current_dir() -> anyhow::Result<PathBuf> {
     let err = match env::current_dir() {
         Err(err) => err,
         Ok(cwd) => return Ok(cwd),
@@ -1829,12 +1869,111 @@ fn current_dir() -> Result<PathBuf> {
             return Ok(PathBuf::from(cwd));
         }
     }
-    Err(format!(
-        "failed to get current working directory: {} \
+    anyhow::bail!(
+        "failed to get current working directory: {err} \
          --- did your CWD get deleted?",
-        err,
     )
-    .into())
+}
+
+/// Retrieves the hostname that ripgrep should use wherever a hostname is
+/// required. Currently, that's just in the hyperlink format.
+///
+/// This works by first running the given binary program (if present and with
+/// no arguments) to get the hostname after trimming leading and trailing
+/// whitespace. If that fails for any reason, then it falls back to getting
+/// the hostname via platform specific means (e.g., `gethostname` on Unix).
+///
+/// The purpose of `bin` is to make it possible for end users to override how
+/// ripgrep determines the hostname.
+fn hostname(bin: Option<&OsStr>) -> Option<String> {
+    let Some(bin) = bin else { return platform_hostname() };
+    let bin = match grep::cli::resolve_binary(bin) {
+        Ok(bin) => bin,
+        Err(err) => {
+            log::debug!(
+                "failed to run command '{bin:?}' to get hostname \
+                 (falling back to platform hostname): {err}",
+            );
+            return platform_hostname();
+        }
+    };
+    let mut cmd = std::process::Command::new(&bin);
+    cmd.stdin(std::process::Stdio::null());
+    let rdr = match grep::cli::CommandReader::new(&mut cmd) {
+        Ok(rdr) => rdr,
+        Err(err) => {
+            log::debug!(
+                "failed to spawn command '{bin:?}' to get \
+                 hostname (falling back to platform hostname): {err}",
+            );
+            return platform_hostname();
+        }
+    };
+    let out = match io::read_to_string(rdr) {
+        Ok(out) => out,
+        Err(err) => {
+            log::debug!(
+                "failed to read output from command '{bin:?}' to get \
+                 hostname (falling back to platform hostname): {err}",
+            );
+            return platform_hostname();
+        }
+    };
+    let hostname = out.trim();
+    if hostname.is_empty() {
+        log::debug!(
+            "output from command '{bin:?}' is empty after trimming \
+             leading and trailing whitespace (falling back to \
+             platform hostname)",
+        );
+        return platform_hostname();
+    }
+    Some(hostname.to_string())
+}
+
+/// Attempts to get the hostname by using platform specific routines. For
+/// example, this will do `gethostname` on Unix and `GetComputerNameExW` on
+/// Windows.
+fn platform_hostname() -> Option<String> {
+    let hostname_os = match grep::cli::hostname() {
+        Ok(x) => x,
+        Err(err) => {
+            log::debug!("could not get hostname: {}", err);
+            return None;
+        }
+    };
+    let Some(hostname) = hostname_os.to_str() else {
+        log::debug!(
+            "got hostname {:?}, but it's not valid UTF-8",
+            hostname_os
+        );
+        return None;
+    };
+    Some(hostname.to_string())
+}
+
+/// Returns a value that is meant to fill in the `{wslprefix}` variable for
+/// a user given hyperlink format. A WSL prefix is a share/network like thing
+/// that is meant to permit Windows applications to open files stored within
+/// a WSL drive.
+///
+/// If a WSL distro name is unavailable, not valid UTF-8 or this isn't running
+/// in a Unix environment, then this returns None.
+///
+/// See: <https://learn.microsoft.com/en-us/windows/wsl/filesystems>
+fn wsl_prefix() -> Option<String> {
+    if !cfg!(unix) {
+        return None;
+    }
+    let distro_os = env::var_os("WSL_DISTRO_NAME")?;
+    let Some(distro) = distro_os.to_str() else {
+        log::debug!(
+            "found WSL_DISTRO_NAME={:?}, but value is not UTF-8",
+            distro_os
+        );
+        return None;
+    };
+    Some(format!("wsl$/{distro}"))
 }
 
 /// Tries to assign a timestamp to every `Subject` in the vector to help with
@@ -1842,9 +1981,9 @@ fn current_dir() -> Result<PathBuf> {
 fn load_timestamps<G>(
     subjects: impl Iterator<Item = Subject>,
     get_time: G,
-) -> Vec<(Option<SystemTime>, Subject)>
+) -> Vec<(Option<std::time::SystemTime>, Subject)>
 where
-    G: Fn(&fs::Metadata) -> io::Result<SystemTime>,
+    G: Fn(&std::fs::Metadata) -> io::Result<std::time::SystemTime>,
 {
     subjects
         .map(|s| (s.path().metadata().and_then(|m| get_time(&m)).ok(), s))

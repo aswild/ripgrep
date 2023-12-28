@@ -1,20 +1,24 @@
-use std::fs::File;
-use std::io;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::Duration;
+use std::{
+    io,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
-use grep::cli;
-use grep::matcher::Matcher;
+use {
+    grep::{
+        cli,
+        matcher::Matcher,
+        printer::{Standard, Stats, Summary, JSON},
+        regex::RegexMatcher as RustRegexMatcher,
+        searcher::{BinaryDetection, Searcher},
+    },
+    ignore::overrides::Override,
+    serde_json::{self as json, json},
+    termcolor::WriteColor,
+};
+
 #[cfg(feature = "pcre2")]
 use grep::pcre2::RegexMatcher as PCRE2RegexMatcher;
-use grep::printer::{Standard, Stats, Summary, JSON};
-use grep::regex::RegexMatcher as RustRegexMatcher;
-use grep::searcher::{BinaryDetection, Searcher};
-use ignore::overrides::Override;
-use serde_json as json;
-use serde_json::json;
-use termcolor::WriteColor;
 
 use crate::subject::Subject;
 
@@ -115,7 +119,7 @@ impl SearchWorkerBuilder {
     pub fn preprocessor(
         &mut self,
         cmd: Option<PathBuf>,
-    ) -> crate::Result<&mut SearchWorkerBuilder> {
+    ) -> anyhow::Result<&mut SearchWorkerBuilder> {
         if let Some(ref prog) = cmd {
             let bin = cli::resolve_binary(prog)?;
             self.config.preprocessor = Some(bin);
@@ -396,8 +400,9 @@ impl<W: WriteColor> SearchWorker<W> {
         path: &Path,
     ) -> io::Result<SearchResult> {
         let bin = self.config.preprocessor.as_ref().unwrap();
-        let mut cmd = Command::new(bin);
-        cmd.arg(path).stdin(Stdio::from(File::open(path)?));
+        let mut cmd = std::process::Command::new(bin);
+        cmd.arg(path)
+            .stdin(std::process::Stdio::from(std::fs::File::open(path)?));
 
         let mut rdr = self.command_builder.build(&mut cmd).map_err(|err| {
             io::Error::new(
