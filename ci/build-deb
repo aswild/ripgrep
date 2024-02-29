@@ -54,10 +54,7 @@ mkdir -p "$DEPLOY_DIR"
 
 # Generate man page and shell completions. `cargo deb` knows how to find these
 # files via the manifest configuration in `Cargo.toml`.
-"target/debug/rg" --generate complete-bash > "$DEPLOY_DIR/rg.bash"
-"target/debug/rg" --generate complete-fish > "$DEPLOY_DIR/rg.fish"
-"target/debug/rg" --generate complete-zsh > "$DEPLOY_DIR/_rg"
-"target/debug/rg" --generate man > "$DEPLOY_DIR/rg.1"
+make ASSET_DIR="$DEPLOY_DIR" assets
 
 version="$(git describe --tags --match='[0-9]*' --dirty=+)"
 
