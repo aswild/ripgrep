@@ -138,7 +138,7 @@ generally speaking):
   backreferences in your patterns, which are not supported in ripgrep's default
   regex engine. PCRE2 support can be enabled with `-P/--pcre2` (use PCRE2
   always) or `--auto-hybrid-regex` (use PCRE2 only if needed). An alternative
-  syntax is provided via the `--engine (default|pcre2|auto-hybrid)` option.
+  syntax is provided via the `--engine (default|pcre2|auto)` option.
 * ripgrep has [rudimentary support for replacements](GUIDE.md#replacements),
   which permit rewriting output based on what was matched.
 * ripgrep supports [searching files in text encodings](GUIDE.md#file-encoding)
@@ -218,6 +218,16 @@ Note that ripgrep has grown a few significant new features recently that
 are not yet present in Andy's table. This includes, but is not limited to,
 configuration files, passthru, support for searching compressed files,
 multiline search and opt-in fancy regex support via PCRE2.
+
+
+### Playground
+
+If you'd like to try ripgrep before installing, there's an unofficial
+[playground](https://codapi.org/ripgrep/) and an [interactive
+tutorial](https://codapi.org/try/ripgrep/).
+
+If you have any questions about these, please open an issue in the [tutorial
+repo](https://github.com/nalgeon/tryxinyminutes).
 
 
 ### Installation
@@ -308,6 +318,12 @@ If you're a **Nix** user, you can install ripgrep from
 $ nix-env --install ripgrep
 ```
 
+If you're a **Flox** user, you can install ripgrep as follows:
+
+```
+$ flox install ripgrep
+```
+
 If you're a **Guix** user, you can install ripgrep from the official
 package collection:
 
@@ -320,8 +336,8 @@ then ripgrep can be installed using a binary `.deb` file provided in each
 [ripgrep release](https://github.com/BurntSushi/ripgrep/releases).
 
 ```
-$ curl -LO https://github.com/BurntSushi/ripgrep/releases/download/13.0.0/ripgrep_13.0.0_amd64.deb
-$ sudo dpkg -i ripgrep_13.0.0_amd64.deb
+$ curl -LO https://github.com/BurntSushi/ripgrep/releases/download/14.1.0/ripgrep_14.1.0-1_amd64.deb
+$ sudo dpkg -i ripgrep_14.1.0-1_amd64.deb
 ```
 
 If you run Debian stable, ripgrep is [officially maintained by
@@ -432,18 +448,13 @@ $ ./target/release/rg --version
 0.1.3
 ```
 
-If you have a Rust nightly compiler and a recent Intel CPU, then you can enable
-additional optional SIMD acceleration like so:
-
-```
-RUSTFLAGS="-C target-cpu=native" cargo build --release --features 'simd-accel'
-```
-
-The `simd-accel` feature enables SIMD support in certain ripgrep dependencies
-(responsible for transcoding). They are not necessary to get SIMD optimizations
-for search; those are enabled automatically. Hopefully, some day, the
-`simd-accel` feature will similarly become unnecessary. **WARNING:** Currently,
-enabling this option can increase compilation times dramatically.
+**NOTE:** In the past, ripgrep supported a `simd-accel` Cargo feature when
+using a Rust nightly compiler. This only benefited UTF-16 transcoding.
+Since it required unstable features, this build mode was prone to breakage.
+Because of that, support for it has been removed. If you want SIMD
+optimizations for UTF-16 transcoding, then you'll have to petition the
+[`encoding_rs`](https://github.com/hsivonen/encoding_rs) project to use stable
+APIs.
 
 Finally, optional PCRE2 support can be built with ripgrep by enabling the
 `pcre2` feature:
@@ -451,9 +462,6 @@ Finally, optional PCRE2 support can be built with ripgrep by enabling the
 ```
 $ cargo build --release --features 'pcre2'
 ```
-
-(Tip: use `--features 'pcre2 simd-accel'` to also include compile time SIMD
-optimizations, which will only work with a nightly compiler.)
 
 Enabling the PCRE2 feature works with a stable Rust compiler and will
 attempt to automatically find and link with your system's PCRE2 library via
