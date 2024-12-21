@@ -25,7 +25,7 @@ while (( $# )); do
             TARGET="$2"
             shift
             ;;
-        --install)
+        --install|-i)
             INSTALL_ARG='--install'
             ;;
         --publish)
