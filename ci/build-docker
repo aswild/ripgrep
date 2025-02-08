@@ -1,0 +1,33 @@
+#!/bin/bash
+
+run() {
+    echo "+ $*" >&2
+    "$@"
+}
+
+die() {
+    echo "Error $*" >&2
+    exit 1
+}
+
+set -e
+
+if [[ ! -f Cargo.lock ]]; then
+    die "Please run from the root of the repo"
+fi
+
+SUITE="${1:-}"
+if [[ -z "$SUITE" ]]; then
+    die "Missing distro suite argument"
+fi
+
+DOCKER_IMAGE=aswild/rust:$SUITE
+_uid=$(id -u)
+_gid=$(id -g)
+
+run docker run -ti --rm \
+    --user "${_uid}:${_gid}" \
+    --volume "$PWD:/build" \
+    --workdir /build \
+    $DOCKER_IMAGE \
+    ci/build-deb --no-target
