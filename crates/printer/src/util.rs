@@ -321,7 +321,28 @@ impl<'a> PrinterPath<'a> {
             }
             bytes
         }
-        let Some(sep) = sep else { return self };
+
+        /// Is this a MSYS/MinGW environment? If so, default the path separator to '/'.
+        ///
+        /// This is implemented by looking for a non-empty 'MSYSTEM' environment variable.
+        /// In the future we could also try to detect cygwin, but I think that's trickier.
+        #[cfg(windows)]
+        fn is_msys() -> bool {
+            use std::sync::OnceLock;
+            static CACHE: OnceLock<bool> = OnceLock::new();
+            *CACHE.get_or_init(|| {
+                std::env::var_os("MSYSTEM")
+                    .map(|s| !s.is_empty())
+                    .unwrap_or(false)
+            })
+        }
+
+        let sep = match sep {
+            Some(sep) => sep,
+            #[cfg(windows)]
+            None if is_msys() => b'/',
+            None => return self,
+        };
         self.bytes = Cow::Owned(replace_separator(self.as_bytes(), sep));
         self
     }
