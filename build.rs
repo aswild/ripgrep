@@ -22,7 +22,7 @@ fn set_windows_exe_options() {
     manifest.push(MANIFEST);
     let Some(manifest) = manifest.to_str() else { return };
 
-    println!("cargo:rerun-if-changed={}", MANIFEST);
+    println!("cargo:rerun-if-changed={MANIFEST}");
     // Embed the Windows application manifest file.
     println!("cargo:rustc-link-arg-bin=rg=/MANIFEST:EMBED");
     println!("cargo:rustc-link-arg-bin=rg=/MANIFESTINPUT:{manifest}");
@@ -35,11 +35,7 @@ fn command_output(cmd: &[&str]) -> Option<String> {
     std::process::Command::new(cmd[0]).args(&cmd[1..]).output().ok().and_then(
         |output| {
             let v = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if v.is_empty() {
-                None
-            } else {
-                Some(v)
-            }
+            if v.is_empty() { None } else { Some(v) }
         },
     )
 }

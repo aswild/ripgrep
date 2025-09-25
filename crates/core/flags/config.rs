@@ -10,7 +10,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use bstr::{io::BufReadExt, ByteSlice};
+use bstr::{ByteSlice, io::BufReadExt};
 
 /// On Unix, /etc/ripgreprc will be used as a default config file if RIPGREP_CONFIG_PATH is unset.
 #[cfg(unix)]
